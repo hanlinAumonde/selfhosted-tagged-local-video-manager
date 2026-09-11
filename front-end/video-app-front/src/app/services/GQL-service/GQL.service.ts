@@ -13,6 +13,7 @@ import {
   SearchFrom,
   VideoSortOption,
   BrowseDirectoryGQL,
+  SearchInDirectoryGQL,
   CreateDirectoryGQL,
   DeleteVideoGQL,
   VideosBatchOperationInput,
@@ -82,6 +83,7 @@ export class GqlService {
   private recordVideoViewGQL = inject(RecordVideoViewGQL)
   private updateVideoMetadataGQL = inject(UpdateVideoMetadataGQL)
   private browseDirectoryGQL = inject(BrowseDirectoryGQL)
+  private searchInDirectoryGQL = inject(SearchInDirectoryGQL)
   private deleteVideoGQL = inject(DeleteVideoGQL)
   private createDirectoryGQL = inject(CreateDirectoryGQL)
   private getDirectoryMetadataGQL = inject(GetDirectoryMetadataGQL)
@@ -232,6 +234,32 @@ export class GqlService {
         }
       }).valueChanges,
       (data) => this.filterUndefinedResult(data.browseDirectory ?? []) as BrowseDirectoryDetail
+    )
+  }
+
+  /**
+   * Search the catalogued videos under a directory and everything below it.
+   *
+   * A one-shot fetch rather than a watch query: a search is something the user asks for,
+   * not a view that should re-run itself.
+   */
+  searchInDirectoryQuery(relativePath: string,
+                         name?: string,
+                         author?: string,
+                         tags: string[] = []): Observable<ResultState<BrowseDirectoryDetail>> {
+    return this.toResultStateObservable(
+      this.searchInDirectoryGQL.fetch({
+        variables: {
+          input: {
+            path: { relativePath: relativePath },
+            name: { keyWord: name || undefined },
+            author: { keyWord: author || undefined },
+            tags: tags
+          }
+        }
+      }),
+      (data) => this.filterUndefinedResult(data.searchInDirectory ?? []) as BrowseDirectoryDetail,
+      false
     )
   }
 

@@ -1,0 +1,103 @@
+<h2 mat-dialog-title><strong class="font-mono">Search in this directory</strong></h2>
+
+<mat-dialog-content>
+  <p class="mb-4 text-sm text-gray-600 dark:text-gray-300">
+    Searches <span class="font-mono font-bold">{{ data.directoryPath }}</span> and everything below it.
+    Fields you leave blank are not used.
+  </p>
+
+  <form [formGroup]="searchForm" class="space-y-4" (ngSubmit)="search()">
+    <!-- Name -->
+    <mat-form-field appearance="outline" class="w-full">
+      <mat-label>Name</mat-label>
+      <input
+        matInput
+        formControlName="name"
+        cdkFocusInitial
+        autocomplete="off"
+        placeholder="Part of the video name"
+        [matAutocomplete]="nameAuto" />
+      @if (searchForm.get('name')?.hasError('maxLength')) {
+        <mat-error>Too long (max {{ searchForm.get('name')?.errors?.['maxLength']?.max }})</mat-error>
+      }
+      <mat-autocomplete #nameAuto="matAutocomplete">
+        @for (name of nameSuggestions().data; track name) {
+          <mat-option [value]="name">{{ name }}</mat-option>
+        }
+      </mat-autocomplete>
+    </mat-form-field>
+
+    <!-- Author -->
+    <mat-form-field appearance="outline" class="w-full">
+      <mat-label>Author</mat-label>
+      <input
+        matInput
+        formControlName="author"
+        autocomplete="off"
+        placeholder="Part of the author name"
+        [matAutocomplete]="authorAuto" />
+      @if (searchForm.get('author')?.hasError('maxLength')) {
+        <mat-error>Too long (max {{ searchForm.get('author')?.errors?.['maxLength']?.max }})</mat-error>
+      }
+      <mat-autocomplete #authorAuto="matAutocomplete">
+        @for (author of authorSuggestions().data; track author) {
+          <mat-option [value]="author">{{ author }}</mat-option>
+        }
+      </mat-autocomplete>
+    </mat-form-field>
+
+    <!-- Tags -->
+    <div class="flex flex-col gap-2">
+      @if (tags().length > 0) {
+        <mat-chip-set>
+          @for (tag of tags(); track tag) {
+            <mat-chip (removed)="removeTag(tag)">
+              {{ tag }}
+              <button matChipRemove type="button" [attr.aria-label]="'remove ' + tag">
+                <mat-icon fontIcon="cancel"></mat-icon>
+              </button>
+            </mat-chip>
+          }
+        </mat-chip-set>
+      }
+      <mat-form-field appearance="outline" class="w-full">
+        <mat-label>Tags</mat-label>
+        <input
+          matInput
+          formControlName="tagInput"
+          autocomplete="off"
+          placeholder="A video must carry every tag listed"
+          [matAutocomplete]="tagAuto"
+          (keydown.enter)="onTagInputEnter($event)" />
+        @if (searchForm.get('tagInput')?.hasError('maxLength')) {
+          <mat-error>Tag too long (max {{ searchForm.get('tagInput')?.errors?.['maxLength']?.max }})</mat-error>
+        }
+        <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
+        <mat-autocomplete #tagAuto="matAutocomplete" (optionSelected)="addTag($event.option.value)">
+          @if (tagSuggestions().data && tagSuggestions().data!.length > 0) {
+            @for (tag of tagSuggestions().data; track tag) {
+              <mat-option [value]="tag">
+                <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ tag }}</span>
+              </mat-option>
+            }
+          } @else {
+            <mat-option disabled>No tag-suggestions available, press Enter to use what you typed</mat-option>
+          }
+        </mat-autocomplete>
+      </mat-form-field>
+    </div>
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions [align]="'end'">
+  <button matButton="outlined" type="button" mat-dialog-close>Cancel</button>
+  <button
+    matButton="tonal"
+    type="button"
+    color="primary"
+    [disabled]="searchForm.invalid || !canSearch()"
+    (click)="search()"
+  >
+    Search
+  </button>
+</mat-dialog-actions>

@@ -5,7 +5,11 @@ from src.config import Settings
 from src.context import ContextEnum, get_context_value
 from src.errors import DatabaseOperationError, InputValidationError
 from src.logger import get_logger
-from src.schema.types.fileBrowse_type import FileBrowseNode, RelativePathInput
+from src.schema.types.fileBrowse_type import (
+    FileBrowseNode,
+    RelativePathInput,
+    SearchInDirectoryInput
+)
 from src.schema.types.search_type import (
     DirectoryMetadataResult,
     SearchFrom,
@@ -15,7 +19,12 @@ from src.schema.types.search_type import (
     Pagination
 )
 from src.schema.types.video_type import Video, VideoTag
-from src.features.browsing.browse_file_service import BrowseEntry, BrowseFileService, DirectoryEntry
+from src.features.browsing.browse_file_service import (
+    BrowseEntry,
+    BrowseFileService,
+    DirectoryEntry,
+    DirectorySearchCriteria
+)
 from src.features.catalog.catalog_service import CatalogService, VideoSearchCriteria
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.storage.absolute_path import AbsolutePath
@@ -162,6 +171,44 @@ async def resolve_browse_directory(input: RelativePathInput, info: strawberry.In
     return [await _to_browse_node(entry) for entry in entries]
 
 
+async def resolve_search_in_directory(input: SearchInDirectoryInput, info: strawberry.Info) -> list[FileBrowseNode]:
+    """
+    Resolve function to search the catalogued videos under a directory and everything
+    below it, by name, author and tags.
+
+    Results are published as ``FileBrowseNode`` — the same shape ``browseDirectory``
+    returns — so the frontend renders them through the table it already has, with every
+    row action working as it does in an ordinary listing.
+
+    :param input: The directory to search and the fields to match.
+    :type input: SearchInDirectoryInput
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
+    :return: List of file browse nodes matching the search.
+    :rtype: list[FileBrowseNode]
+    """
+    try:
+        validated_input = input.to_pydantic()
+    except Exception as e:
+        logger.exception(f"Input validation error: {e}")
+        raise InputValidationError(field="SearchInDirectoryInput", issue="Invalid input data for directory search")
+
+    browseFileService: BrowseFileService = get_context_value(info, ContextEnum.BROWSE_FILE_SERVICE)
+    entries = await browseFileService.search_videos_in_directory(
+        AbsolutePath.from_relative_path(
+            parsedPath=validated_input.path.parsedPath,
+            handlerService=get_context_value(info, ContextEnum.RESOURCE_HANDLER_SERVICE),
+            settings=get_context_value(info, ContextEnum.SETTINGS)
+        ),
+        DirectorySearchCriteria(
+            name=validated_input.name.keyWord,
+            author=validated_input.author.keyWord,
+            tags=validated_input.tags,
+        )
+    )
+    return [await _to_browse_node(entry) for entry in entries]
+
+
 async def _to_browse_node(entry: BrowseEntry) -> FileBrowseNode:
     """
     Present one directory-listing entry as the GraphQL node the frontend consumes.
@@ -189,7 +236,12 @@ async def _to_browse_node(entry: BrowseEntry) -> FileBrowseNode:
 
     return FileBrowseNode(
         node=await Video.from_mongoDB(
-            entry.document, getTagsCount=False, isLocked=entry.is_locked
+            entry.document,
+            getTagsCount=False,
+            isLocked=entry.is_locked,
+            # Empty means "in the directory that was asked about", which is every row of
+            # an ordinary listing — published as null rather than as an empty string.
+            relativePath=entry.relative_dir or None,
         )
     )
 

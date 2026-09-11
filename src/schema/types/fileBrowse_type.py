@@ -3,8 +3,10 @@ import strawberry
 
 from src.schema.types.pydantic_types.fileBrowe_type import (
     CreateDirectoryInputModel,
-    RelativePathInputModel
+    RelativePathInputModel,
+    SearchInDirectoryInputModel
 )
+from src.schema.types.search_type import SerachKeyword
 from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,
     TagsOperationMappingInputModel,
@@ -25,6 +27,14 @@ class RelativePathInput:
     recursiveCalculation: strawberry.auto
     relativePath: strawberry.auto
     parsedPath: strawberry.auto
+
+
+@strawberry.experimental.pydantic.input(model=SearchInDirectoryInputModel)
+class SearchInDirectoryInput:
+    path: RelativePathInput
+    name: SerachKeyword
+    author: SerachKeyword
+    tags: strawberry.auto
 
 
 @strawberry.experimental.pydantic.input(model=CreateDirectoryInputModel)

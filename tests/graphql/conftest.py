@@ -130,6 +130,7 @@ def mock_browse_file_service() -> MagicMock:
     svc = MagicMock(spec=BrowseFileService, name="BrowseFileService")
     svc.get_node_list_in_directory = AsyncMock(return_value=[])
     svc.get_all_video_entries_in_directory = MagicMock(return_value=[])
+    svc.search_videos_in_directory = AsyncMock(return_value=[])
     svc.create_directory = AsyncMock(return_value="Test-category/Test-resource/new_folder")
     return svc
 

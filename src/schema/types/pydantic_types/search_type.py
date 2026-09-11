@@ -26,6 +26,26 @@ class SearchKeywordModel(BaseModel):
         return escape_unescaped(v, REGEX_SPECIAL_CHARS)
 
 
+def validate_tag_list(v: list[str]) -> list[str]:
+    """
+    Check a list of tag filters against the configured limits.
+
+    Shared rather than written per input model: every surface that filters by tag is
+    filtering the same field, so a tag that is too long in one place must be too long in
+    all of them.
+    """
+    validation = get_settings().validation
+
+    if len(v) > validation.max_tags_count:
+        raise ValueError(f"Too many tags (max {validation.max_tags_count})")
+
+    for tag in v:
+        if len(tag) > validation.tag_max_length:
+            raise ValueError(f"Tag '{tag}' too long (max {validation.tag_max_length})")
+
+    return v
+
+
 class SuggestionInputModel(BaseModel):
     keyword: SearchKeywordModel
     suggestionType: str  
@@ -42,17 +62,7 @@ class VideoSearchInputModel(BaseModel):
     @field_validator("tags", mode="after")
     @classmethod
     def validate_tags(cls, v: list[str]) -> list[str]:
-        settings = get_settings()
-        validation = settings.validation
-
-        if len(v) > validation.max_tags_count:
-            raise ValueError(f"Too many tags (max {validation.max_tags_count})")
-
-        for tag in v:
-            if len(tag) > validation.tag_max_length:
-                raise ValueError(f"Tag '{tag}' too long (max {validation.tag_max_length})")
-
-        return v
+        return validate_tag_list(v)
 
     @field_validator("currentPageNumber", mode="after")
     @classmethod

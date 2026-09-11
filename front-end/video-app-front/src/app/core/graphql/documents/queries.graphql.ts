@@ -107,6 +107,32 @@ export const BROWSE_DIRECTORY = gql`
         seriesName
         seriesOrder
         isLocked
+        relativePath
+      }
+    }
+  }
+`;
+
+export const SEARCH_IN_DIRECTORY = gql`
+  query SearchInDirectory($input: SearchInDirectoryInput!) {
+    searchInDirectory(input: $input) {
+      node {
+        id
+        isDir
+        name
+        tags {
+          name
+        }
+        author
+        loved
+        lastModifyTime
+        introduction
+        size
+        duration
+        seriesName
+        seriesOrder
+        isLocked
+        relativePath
       }
     }
   }

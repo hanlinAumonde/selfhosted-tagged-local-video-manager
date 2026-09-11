@@ -1,11 +1,14 @@
 import asyncio
-from dataclasses import dataclass
+import posixpath
+import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from pymongo import UpdateOne
 
 from src.config import Settings
 from src.features.catalog.video import VideoModel
-from src.errors import FileBrowseError, InputValidationError
+from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
@@ -48,17 +51,54 @@ class VideoEntry:
 
     ``is_locked`` is resolved in bulk for the whole directory rather than per file, so it
     is carried here instead of being looked up again downstream.
+
+    ``relative_dir`` is empty for an ordinary listing, where every row sits in the
+    directory being listed. A search descends, so its results carry the sub-directory they
+    were found in — without it two same-named results are indistinguishable.
     """
     document: VideoModel
     is_locked: bool
+    relative_dir: str = ""
 
 
 #: What one row of a directory listing can be.
 BrowseEntry = DirectoryEntry | VideoEntry
 
+#: Decides whether one video file met during a directory walk belongs in the result.
+#: ``False`` excludes it; ``True`` and ``None`` keep it, so a caller with nothing to say
+#: about an entry does not have to say it.
+SearchOperator = Callable[[BaseFileEntry], bool | None]
+
 #: Characters that would make a new directory name address something other than a single
 #: child of the directory the user is looking at.
 _NAME_SEPARATORS = ("/", "\\")
+
+
+def _keyword(value: str | None) -> str | None:
+    """A keyword that actually narrows anything, or None."""
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+@dataclass(slots=True)
+class DirectorySearchCriteria:
+    """
+    What a search inside one directory is asking for.
+
+    A blank field is not a filter: the panel sends all three fields every time, and an
+    untouched box must not narrow the result set.
+
+    ``name`` and ``author`` arrive as regexes whose metacharacters are already escaped by
+    ``SearchKeywordModel`` — the same contract ``CatalogService.search_videos`` works
+    under, so the two search surfaces cannot drift apart on what a dot means.
+    """
+    name: str | None = None
+    author: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+    def is_blank(self) -> bool:
+        """True when nothing here would narrow anything."""
+        return not (_keyword(self.name) or _keyword(self.author) or self.tags)
 
 
 class BrowseFileService:
@@ -406,14 +446,25 @@ class BrowseFileService:
         await self.dirMetadataService.mark_user_created(category, db_path)
         return db_path
 
-    def get_all_video_entries_in_directory(self, mounted_directory_path: str, category: str) -> list[BaseFileEntry]:
+    def get_all_video_entries_in_directory(self,
+                                           mounted_directory_path: str,
+                                           category: str,
+                                           search_operator: SearchOperator | None = None
+                                           ) -> list[BaseFileEntry]:
         """
         Get all video file entries under the given directory and its subdirectories.
+
+        ``search_operator`` decides which of them are wanted. A rejected entry is dropped
+        from the result and nothing else: the walk carries on, so a directory whose own
+        files all fail the test still contributes whatever its sub-directories hold.
 
         :param mounted_directory_path: The path of the mounted directory.
         :type mounted_directory_path: str
         :param category: The category of the video files.
         :type category: str
+        :param search_operator: Consulted for every video file met. Returning ``False``
+            excludes that file; ``True``, ``None``, or no operator at all keeps it.
+        :type search_operator: SearchOperator | None
         :return: A list of video file entries.
         :rtype: list[BaseFileEntry]
         """
@@ -423,14 +474,115 @@ class BrowseFileService:
             with handler.list_directory(mounted_directory_path) as entries:
                 for entry in entries:
                     if entry.is_file() and handler.is_video_file(entry.name):
-                        video_entries.append(entry)
+                        if search_operator is None or search_operator(entry) is not False:
+                            video_entries.append(entry)
                     elif entry.is_dir():
                         video_entries.extend(
                             self.get_all_video_entries_in_directory(
                                 handler.get_path_standard_format(entry.path),
-                                category
+                                category,
+                                search_operator
                             )
                         )
         except (OSError, Exception):
             logger.exception(f"Error accessing directory {mounted_directory_path} to get video entries.")
         return video_entries
+
+    async def search_videos_in_directory(self,
+                                         abs_path: AbsolutePath,
+                                         criteria: DirectorySearchCriteria
+                                         ) -> list[VideoEntry]:
+        """
+        Find the catalogued videos under ``abs_path`` that match ``criteria``.
+
+        Two sources answer two different questions. The catalogue says *which videos
+        match*: name, author and tags are metadata, and the name a user searches is the
+        one they edited, not the one on disk. The storage says *which files are there*: a
+        record whose file has since been removed must not be offered as something to play,
+        edit or migrate. So the query narrows, and the walk confirms.
+
+        Only videos that already have a document can match, and none is created here.
+        A file the catalogue has never seen has no author and no tags to match against,
+        and inserting for it would make a read operation quietly extend the catalogue —
+        that is browsing's job, on the directory the user actually opened.
+
+        :param abs_path: The directory to search, together with everything below it.
+        :type abs_path: AbsolutePath
+        :param criteria: The fields to match. Blank fields are not filters.
+        :type criteria: DirectorySearchCriteria
+        :return: The matching videos, each carrying its lock state and the sub-directory
+            it was found in.
+        :rtype: list[VideoEntry]
+        :raises InputValidationError: If the path is not a real directory, or nothing in
+            the criteria would narrow anything.
+        :raises DatabaseOperationError: If the catalogue query itself fails.
+        """
+        if abs_path.is_root_level() or abs_path.is_category_level():
+            raise InputValidationError(
+                field="path",
+                issue="a search runs inside a resource directory",
+            )
+        if criteria.is_blank():
+            raise InputValidationError(
+                field="criteria",
+                issue="a search needs a name, an author or at least one tag",
+            )
+
+        category = abs_path.category
+        handler = self.resourceHandlerService.get_handler(category)
+        root_db_path = abs_path.DB_format_path()
+
+        query_filters: dict = {"path": {"$regex": f"^{re.escape(root_db_path)}/"}}
+        if name := _keyword(criteria.name):
+            query_filters["name"] = {"$regex": name, "$options": "i"}
+        if author := _keyword(criteria.author):
+            query_filters["author"] = {"$regex": author, "$options": "i"}
+        if criteria.tags:
+            query_filters["tags"] = {"$all": list(criteria.tags)}
+
+        try:
+            candidates = {
+                document.path: document
+                for document in await VideoModel.find(query_filters).to_list()
+            }
+        except Exception as e:
+            logger.exception(f"Database operation error during directory search: {e}")
+            raise DatabaseOperationError(
+                operation="search in directory", details=f"Filters-{query_filters}"
+            )
+
+        if not candidates:
+            return []
+
+        # Filled as the walk runs, so the path of a kept entry is converted once rather
+        # than again on the way out.
+        db_path_by_entry: dict[str, str] = {}
+
+        def is_candidate(entry: BaseFileEntry) -> bool:
+            db_path = AbsolutePath.from_existing_path(
+                path=entry.path, category=category, handler=handler
+            ).DB_format_path()
+            if db_path not in candidates:
+                return False
+            db_path_by_entry[entry.path] = db_path
+            return True
+
+        documents = [
+            candidates[db_path_by_entry[entry.path]]
+            for entry in self.get_all_video_entries_in_directory(
+                abs_path.FS_format_path(), category, search_operator=is_candidate
+            )
+        ]
+
+        locked_paths = await self.pathLocks.locked_paths(
+            document.path for document in documents
+        )
+        prefix_length = len(root_db_path) + 1
+        return [
+            VideoEntry(
+                document=document,
+                is_locked=document.path in locked_paths,
+                relative_dir=posixpath.dirname(document.path[prefix_length:]),
+            )
+            for document in documents
+        ]

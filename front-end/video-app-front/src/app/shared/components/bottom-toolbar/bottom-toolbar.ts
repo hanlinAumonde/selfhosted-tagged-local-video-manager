@@ -6,18 +6,22 @@ import { ToastService } from '../../../services/toast-service/toast.service';
 import { MatDialog } from '@angular/material/dialog';
 import { BatchOperationPanel } from '../batch-operation-panel/batch-operation-panel';
 import { MatMenuModule } from "@angular/material/menu";
+import { MatTooltipModule } from "@angular/material/tooltip";
 import { DeleteCheckPanel } from '../delete-check-panel/delete-check-panel';
 import { NewFolderPanel } from '../new-folder-panel/new-folder-panel';
+import { SearchPanel } from '../search-panel/search-panel';
 import {
   BatchPanelVideoItem,
   DeleteCheckPanelData,
   DeleteType,
-  NewFolderPanelData
+  DirectorySearchCriteria,
+  NewFolderPanelData,
+  SearchPanelData
 } from '../../models/panels.model';
 
 @Component({
   selector: 'app-bottom-toolbar',
-  imports: [MatIconModule, MatButtonModule, MatMenuModule],
+  imports: [MatIconModule, MatButtonModule, MatMenuModule, MatTooltipModule],
   templateUrl: './bottom-toolbar.html'
 })
 export class BottomToolbar {
@@ -33,10 +37,16 @@ export class BottomToolbar {
   selectedVideoItems = input<ReadonlyArray<BatchPanelVideoItem>>([]);
   isAtRoot = input.required<boolean>();
   tableWidth = input.required<number>();
+  /** True while the table is showing search results rather than a directory listing. */
+  isSearching = input<boolean>(false);
+  /** What was searched for, one chip per field that was filled in. */
+  searchSummary = input<string[]>([]);
 
   batchOperationResult = output<boolean>();
   createFolderResult = output<boolean>();
   navigateToPath = output<string[]>();
+  searchRequested = output<DirectorySearchCriteria>();
+  exitSearch = output<void>();
 
   paths = computed(() => {
     return ["Root", ...this.currentPath()];
@@ -47,6 +57,9 @@ export class BottomToolbar {
    * the storage: the root lists categories, and a category lists configured mount points.
    */
   canCreateFolder = computed(() => this.currentPath().length >= 2);
+
+  /** A search walks the storage, so it needs the same kind of place a new folder does. */
+  canSearch = computed(() => this.currentPath().length >= 2);
 
   private pathContainer = viewChild<ElementRef>('pathContainer');
 
@@ -183,6 +196,23 @@ export class BottomToolbar {
 
     dialogRef.afterClosed().subscribe(result => {
       this.createFolderResult.emit(result ? true : false);
+    });
+  }
+
+  openSearchPanel() {
+    if (!this.canSearch()) return;
+
+    this.toastService.clearAllToasts();
+
+    const dialogRef = this.dialog.open(SearchPanel, {
+      width: '480px',
+      data: { directoryPath: this.currentPath().join('/') } as SearchPanelData,
+    });
+
+    dialogRef.afterClosed().subscribe((criteria: DirectorySearchCriteria | undefined) => {
+      if (criteria) {
+        this.searchRequested.emit(criteria);
+      }
     });
   }
 
