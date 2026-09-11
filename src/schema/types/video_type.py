@@ -39,12 +39,18 @@ class Video:
     # a locked video; the backend enforces the same rule in its mutations.
     isLocked: bool = False
 
+    # Where this row was found, relative to the directory that was asked about. Null for
+    # an ordinary listing, whose rows are all in that directory; set for a search result,
+    # which may come from any depth below it.
+    relativePath: Optional[str] = None
+
     @classmethod
     async def from_mongoDB(
         cls,
         videoModel: VideoModel,
         getTagsCount: bool = False,
         isLocked: bool = False,
+        relativePath: Optional[str] = None,
     ) -> "Video":
         """
         Convert a VideoModel instance from MongoDB to a Video GraphQL type.
@@ -57,6 +63,9 @@ class Video:
             rather than queried here, so a list of videos costs one lookup instead of N —
             see ``find_locked_paths``.
         :type isLocked: bool
+        :param relativePath: The sub-directory this row was found in, relative to the
+            directory that was asked about. Only a search has one.
+        :type relativePath: Optional[str]
         :return: The GraphQL representation.
         :rtype: Video
         """
@@ -88,6 +97,7 @@ class Video:
             seriesName=videoModel.seriesName,
             seriesOrder=videoModel.seriesOrder,
             isLocked=isLocked,
+            relativePath=relativePath,
         )
     
     @classmethod

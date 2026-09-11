@@ -13,6 +13,8 @@ import {
   SearchFrom,
   VideoSortOption,
   BrowseDirectoryGQL,
+  SearchInDirectoryGQL,
+  CreateDirectoryGQL,
   DeleteVideoGQL,
   VideosBatchOperationInput,
   GetDirectoryMetadataGQL,
@@ -49,6 +51,7 @@ import {
   BatchUpdateVideosDetail,
   BrowseDirectoryDetail,
   CancelMigrationTaskDetail,
+  CreateDirectoryDetail,
   CreateMigrationTaskDetail,
   DeleteVideoDetail,
   DirectoryMetadataDetail,
@@ -80,7 +83,9 @@ export class GqlService {
   private recordVideoViewGQL = inject(RecordVideoViewGQL)
   private updateVideoMetadataGQL = inject(UpdateVideoMetadataGQL)
   private browseDirectoryGQL = inject(BrowseDirectoryGQL)
+  private searchInDirectoryGQL = inject(SearchInDirectoryGQL)
   private deleteVideoGQL = inject(DeleteVideoGQL)
+  private createDirectoryGQL = inject(CreateDirectoryGQL)
   private getDirectoryMetadataGQL = inject(GetDirectoryMetadataGQL)
   private batchUpdateVideosSubscriptionGQL = inject(BatchUpdateSubscriptionGQL)
   private batchDeleteVideosSubscriptionGQL = inject(BatchDeleteSubscriptionGQL)
@@ -232,6 +237,32 @@ export class GqlService {
     )
   }
 
+  /**
+   * Search the catalogued videos under a directory and everything below it.
+   *
+   * A one-shot fetch rather than a watch query: a search is something the user asks for,
+   * not a view that should re-run itself.
+   */
+  searchInDirectoryQuery(relativePath: string,
+                         name?: string,
+                         author?: string,
+                         tags: string[] = []): Observable<ResultState<BrowseDirectoryDetail>> {
+    return this.toResultStateObservable(
+      this.searchInDirectoryGQL.fetch({
+        variables: {
+          input: {
+            path: { relativePath: relativePath },
+            name: { keyWord: name || undefined },
+            author: { keyWord: author || undefined },
+            tags: tags
+          }
+        }
+      }),
+      (data) => this.filterUndefinedResult(data.searchInDirectory ?? []) as BrowseDirectoryDetail,
+      false
+    )
+  }
+
   getDirectoryMetadataQuery(relativePath?: string): Observable<ResultState<DirectoryMetadataDetail>> {
     return this.toResultStateObservable(
       this.getDirectoryMetadataGQL.fetch({
@@ -279,6 +310,21 @@ export class GqlService {
         success: data.deleteVideo?.success ?? false,
         video: data.deleteVideo?.video
       } as DeleteVideoDetail)
+    )
+  }
+
+  createDirectoryMutation(parentPath: string | undefined, name: string): Observable<ResultState<CreateDirectoryDetail>> {
+    return this.toResultStateObservable(
+      this.createDirectoryGQL.mutate({
+        variables: {
+          input: {
+            parentPath: { relativePath: parentPath },
+            name: name
+          }
+        }
+      }),
+      (data) => (data.createDirectory ?? null) as CreateDirectoryDetail | null,
+      false
     )
   }
 

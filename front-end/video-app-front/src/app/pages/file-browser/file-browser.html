@@ -26,6 +26,11 @@
     [selectedVideoItems]="selectedVideoItems()"
     [isAtRoot]="isAtRoot()"
     [tableWidth]="tableWidth()"
+    [isSearching]="isSearching()"
+    [searchSummary]="searchSummary()"
     (navigateToPath)="navigateToPath($event)"
+    (createFolderResult)="$event && refreshDirectory()"
+    (searchRequested)="runSearch($event)"
+    (exitSearch)="exitSearch()"
   />
 </div>

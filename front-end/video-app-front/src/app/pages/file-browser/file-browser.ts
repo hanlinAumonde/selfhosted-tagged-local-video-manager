@@ -4,7 +4,7 @@ import {
   BrowseDirectoryDetail,
   FileBrowseNode,
 } from '../../shared/models/GQL-result.model';
-import { BatchPanelVideoItem } from '../../shared/models/panels.model';
+import { BatchPanelVideoItem, DirectorySearchCriteria } from '../../shared/models/panels.model';
 import { PageStateService } from '../../services/Page-state-service/page-state.service';
 import { environment } from '../../../environments/environment';
 import {
@@ -51,6 +51,23 @@ export class FileBrowser implements OnDestroy{
   selectedIds = signal<Set<string>>(new Set());
 
   private directorySubscription: Subscription | null = null;
+
+  /**
+   * What is on screen. Null means the table is showing the directory listing; anything
+   * else means it is showing the results of that search, taken over the current directory
+   * and everything below it.
+   */
+  searchCriteria = signal<DirectorySearchCriteria | null>(null);
+  isSearching = computed(() => this.searchCriteria() !== null);
+  searchSummary = computed<string[]>(() => {
+    const criteria = this.searchCriteria();
+    if (!criteria) return [];
+    return [
+      ...(criteria.name ? [`name: ${criteria.name}`] : []),
+      ...(criteria.author ? [`author: ${criteria.author}`] : []),
+      ...criteria.tags.map(tag => `tag: ${tag}`)
+    ];
+  });
 
   isAtRoot = computed(() => this.currentPath().length === 0);
   selectedCount = computed(() => this.selectedIds().size);
@@ -197,7 +214,53 @@ export class FileBrowser implements OnDestroy{
       this.sortCriteria().order,
       path
     );
+    if (this.isSearching()) {
+      // The table is showing results, not a listing — reloading the directory under it
+      // would silently swap what the toolbar says is on screen.
+      this.loadSearchResults();
+      return;
+    }
     this.loadDirectory(path, true, false);
+  }
+
+  // ─── Search ────────────────────────────────────────────────────────
+
+  runSearch(criteria: DirectorySearchCriteria) {
+    this.searchCriteria.set(criteria);
+    this.loadSearchResults();
+  }
+
+  exitSearch() {
+    if (!this.isSearching()) return;
+    this.searchCriteria.set(null);
+    this.loadDirectory(this.currentPath(), true, false);
+  }
+
+  private loadSearchResults() {
+    const criteria = this.searchCriteria();
+    if (!criteria) return;
+
+    this.directorySubscription?.unsubscribe();
+    this.directoryContents.set(this.gqlService.initialSignalData<BrowseDirectoryDetail>([]));
+    this.directorySubscription = this.gqlService.searchInDirectoryQuery(
+      this.currentPath().join('/'), criteria.name, criteria.author, criteria.tags
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.selectedIds.set(new Set());
+          this.directoryContents.set(result);
+          if (result.data) {
+            this.sortItemsBy(this.sortCriteria(), result.data);
+            if (result.data.some(item => item.node.isLocked)) {
+              this.migrationTracker.trackTasksInDirectory(this.currentPath().join('/'));
+            }
+          }
+        },
+        error: (err) => {
+          this.toastService.emitNewToast('Failed to search: ' + err.message, ToastType.Error);
+        }
+      });
   }
 
   refreshSelectedDirectory(item: FileBrowseNode) {
@@ -238,6 +301,9 @@ export class FileBrowser implements OnDestroy{
       this.toggleSelection(node.node.id);
       return;
     };
+    // Entering a directory leaves the result set behind — the listing effect below takes
+    // over from here.
+    this.searchCriteria.set(null);
     const newPath = [...this.currentPath(), node.node.name];
     this.setRefreshState(0, this.sortCriteria().index, this.sortCriteria().order, newPath);
     this.currentPath.set(newPath);
@@ -245,6 +311,7 @@ export class FileBrowser implements OnDestroy{
   }
 
   navigateToPath(path: string[]) {
+    this.searchCriteria.set(null);
     this.setRefreshState(0, this.sortCriteria().index, this.sortCriteria().order, path);
     this.currentPath.set(path);
   }

@@ -61,6 +61,37 @@
     }
   </section>
 
+  <!-- Last Updated Section -->
+  <section class="@container">
+    <div class="flex justify-between items-center mb-6 mt-10">
+      <h2 class="text-xl font-semibold text-emerald-600 dark:text-emerald-200
+               bg-emerald-200 dark:bg-emerald-600 rounded-3xl px-5 py-1">Last Updated</h2>
+      @if(!lastUpdatedVideos().loading && lastUpdatedVideos().data && lastUpdatedVideos().data!.videos.length > 0){
+        <button
+          matButton="tonal"
+          (click)="OnMoreClick('lastUpdate')"
+        >
+          <strong class="text-xl">More</strong>
+        </button>
+      }
+    </div>
+    @if (lastUpdatedVideos().loading) {
+      <div class="grid @4xl:grid-cols-5 grid-cols-2 gap-4 mb-10">
+        @for (item of [1,2,3,4,5,6,7,8,9,10]; track $index) {
+          <app-video-card />
+        }
+      </div>
+    } @else if(lastUpdatedVideos().data && lastUpdatedVideos().data!.videos.length > 0){
+      <div class="grid @4xl:grid-cols-5 grid-cols-2 gap-4 mb-10">
+        @for (video of lastUpdatedVideos().data!.videos; track video.id) {
+          <app-video-card [video]="video" />
+        }
+      </div>
+    } @else{
+      <p class="text-gray-500 dark:text-gray-400 italic">No videos available. Check back later!</p>
+    }
+  </section>
+
   <!-- Most Viewed Section -->
   <section class="@container">
     <div class="flex justify-between items-center mb-6 mt-10">

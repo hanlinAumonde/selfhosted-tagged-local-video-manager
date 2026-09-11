@@ -2,6 +2,7 @@ import {
     BatchUpdateSubscriptionSubscription,
     BrowseDirectoryQuery,
     CancelMigrationTaskMutation,
+    CreateDirectoryMutation,
     CreateMigrationTaskMutation,
     DeleteVideoMutation,
     GetDirectoryMetadataQuery,
@@ -38,6 +39,8 @@ export type FileBrowseNode = BrowseDirectoryQuery['browseDirectory'][0];
 export type BrowsedVideo = BrowseDirectoryQuery['browseDirectory'][0]['node'];
 
 export type DeleteVideoDetail = DeleteVideoMutation['deleteVideo'];
+
+export type CreateDirectoryDetail = CreateDirectoryMutation['createDirectory'];
 
 export type BatchUpdateVideosDetail = BatchUpdateSubscriptionSubscription['batchUpdateSubscription'];
 

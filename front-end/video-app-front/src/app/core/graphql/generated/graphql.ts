@@ -32,6 +32,11 @@ export enum BatchResultType {
   Success = 'Success'
 }
 
+export type CreateDirectoryInput = {
+  name: Scalars['String']['input'];
+  parentPath: RelativePathInput;
+};
+
 export type CreateMigrationTaskInput = {
   conflictStrategy?: InputMaybe<Scalars['String']['input']>;
   sourceVideoId: Scalars['String']['input'];
@@ -42,6 +47,13 @@ export type DirectoryMetadataResult = {
   __typename?: 'DirectoryMetadataResult';
   lastModifiedTime: Scalars['Float']['output'];
   totalSize: Scalars['Float']['output'];
+};
+
+export type DirectoryMutationResult = {
+  __typename?: 'DirectoryMutationResult';
+  name: Scalars['String']['output'];
+  path: Scalars['String']['output'];
+  success: Scalars['Boolean']['output'];
 };
 
 export type FileBrowseNode = {
@@ -136,6 +148,7 @@ export type MigrationTaskQueryInput = {
 export type Mutation = {
   __typename?: 'Mutation';
   cancelMigrationTask: MigrationTaskMutationResult;
+  createDirectory: DirectoryMutationResult;
   createMigrationTask: MigrationTaskMutationResult;
   deleteVideo: VideoMutationResult;
   migrationPreflight: MigrationPreflightResult;
@@ -146,6 +159,11 @@ export type Mutation = {
 
 export type MutationCancelMigrationTaskArgs = {
   input: MigrationTaskActionInput;
+};
+
+
+export type MutationCreateDirectoryArgs = {
+  input: CreateDirectoryInput;
 };
 
 
@@ -190,6 +208,7 @@ export type Query = {
   getSuggestions: Array<Scalars['String']['output']>;
   getTopTags: Array<VideoTag>;
   getVideoById: Video;
+  searchInDirectory: Array<FileBrowseNode>;
   searchSeriesByPrefix: Array<Scalars['String']['output']>;
 };
 
@@ -229,6 +248,11 @@ export type QueryGetVideoByIdArgs = {
 };
 
 
+export type QuerySearchInDirectoryArgs = {
+  input: SearchInDirectoryInput;
+};
+
+
 export type QuerySearchSeriesByPrefixArgs = {
   limit: Scalars['Int']['input'];
   prefix: Scalars['String']['input'];
@@ -251,6 +275,13 @@ export enum SearchFrom {
   FrontalPage = 'FrontalPage',
   SearchPage = 'SearchPage'
 }
+
+export type SearchInDirectoryInput = {
+  author: SerachKeyword;
+  name: SerachKeyword;
+  path: RelativePathInput;
+  tags?: Array<Scalars['String']['input']>;
+};
 
 export type SerachKeyword = {
   keyWord?: InputMaybe<Scalars['String']['input']>;
@@ -333,6 +364,7 @@ export type Video = {
   lastViewTime: Scalars['Float']['output'];
   loved: Scalars['Boolean']['output'];
   name: Scalars['String']['output'];
+  relativePath?: Maybe<Scalars['String']['output']>;
   seriesName?: Maybe<Scalars['String']['output']>;
   seriesOrder?: Maybe<Scalars['Int']['output']>;
   size: Scalars['Float']['output'];
@@ -363,6 +395,7 @@ export type VideoSearchResult = {
 };
 
 export enum VideoSortOption {
+  LastUpdate = 'LastUpdate',
   Latest = 'Latest',
   Longest = 'Longest',
   Loved = 'Loved',
@@ -445,6 +478,13 @@ export type RecordVideoViewMutationVariables = Exact<{
 
 export type RecordVideoViewMutation = { __typename?: 'Mutation', recordVideoView: { __typename?: 'VideoMutationResult', success: boolean, video?: { __typename?: 'Video', id: string, viewCount: number, lastViewTime: number } | null } };
 
+export type CreateDirectoryMutationVariables = Exact<{
+  input: CreateDirectoryInput;
+}>;
+
+
+export type CreateDirectoryMutation = { __typename?: 'Mutation', createDirectory: { __typename?: 'DirectoryMutationResult', success: boolean, name: string, path: string } };
+
 export type DeleteVideoMutationVariables = Exact<{
   videoId: Scalars['ID']['input'];
 }>;
@@ -503,7 +543,14 @@ export type BrowseDirectoryQueryVariables = Exact<{
 }>;
 
 
-export type BrowseDirectoryQuery = { __typename?: 'Query', browseDirectory: Array<{ __typename?: 'FileBrowseNode', node: { __typename?: 'Video', id: string, isDir: boolean, name: string, author: string, loved: boolean, lastModifyTime: number, introduction: string, size: number, duration: number, seriesName?: string | null, seriesOrder?: number | null, isLocked: boolean, tags: Array<{ __typename?: 'VideoTag', name: string }> } }> };
+export type BrowseDirectoryQuery = { __typename?: 'Query', browseDirectory: Array<{ __typename?: 'FileBrowseNode', node: { __typename?: 'Video', id: string, isDir: boolean, name: string, author: string, loved: boolean, lastModifyTime: number, introduction: string, size: number, duration: number, seriesName?: string | null, seriesOrder?: number | null, isLocked: boolean, relativePath?: string | null, tags: Array<{ __typename?: 'VideoTag', name: string }> } }> };
+
+export type SearchInDirectoryQueryVariables = Exact<{
+  input: SearchInDirectoryInput;
+}>;
+
+
+export type SearchInDirectoryQuery = { __typename?: 'Query', searchInDirectory: Array<{ __typename?: 'FileBrowseNode', node: { __typename?: 'Video', id: string, isDir: boolean, name: string, author: string, loved: boolean, lastModifyTime: number, introduction: string, size: number, duration: number, seriesName?: string | null, seriesOrder?: number | null, isLocked: boolean, relativePath?: string | null, tags: Array<{ __typename?: 'VideoTag', name: string }> } }> };
 
 export type GetDirectoryMetadataQueryVariables = Exact<{
   input: RelativePathInput;
@@ -751,6 +798,26 @@ export const RecordVideoViewDocument = gql`
       super(apollo);
     }
   }
+export const CreateDirectoryDocument = gql`
+    mutation CreateDirectory($input: CreateDirectoryInput!) {
+  createDirectory(input: $input) {
+    success
+    name
+    path
+  }
+}
+    `;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class CreateDirectoryGQL extends Apollo.Mutation<CreateDirectoryMutation, CreateDirectoryMutationVariables> {
+    override document = CreateDirectoryDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
 export const DeleteVideoDocument = gql`
     mutation DeleteVideo($videoId: ID!) {
   deleteVideo(videoId: $videoId) {
@@ -949,6 +1016,7 @@ export const BrowseDirectoryDocument = gql`
       seriesName
       seriesOrder
       isLocked
+      relativePath
     }
   }
 }
@@ -959,6 +1027,41 @@ export const BrowseDirectoryDocument = gql`
   })
   export class BrowseDirectoryGQL extends Apollo.Query<BrowseDirectoryQuery, BrowseDirectoryQueryVariables> {
     override document = BrowseDirectoryDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const SearchInDirectoryDocument = gql`
+    query SearchInDirectory($input: SearchInDirectoryInput!) {
+  searchInDirectory(input: $input) {
+    node {
+      id
+      isDir
+      name
+      tags {
+        name
+      }
+      author
+      loved
+      lastModifyTime
+      introduction
+      size
+      duration
+      seriesName
+      seriesOrder
+      isLocked
+      relativePath
+    }
+  }
+}
+    `;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class SearchInDirectoryGQL extends Apollo.Query<SearchInDirectoryQuery, SearchInDirectoryQueryVariables> {
+    override document = SearchInDirectoryDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);

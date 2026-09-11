@@ -17,7 +17,7 @@ from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.tag_operation_service import TagOperationService
-from src.features.migration.migration_service import find_locked_paths
+from src.platform.jobs.path_locks import PathLockRegistry
 
 logger = get_logger("catalog_service")
 
@@ -25,6 +25,7 @@ logger = get_logger("catalog_service")
 class VideoSortOption(str, Enum):
     """How a result page is ordered. Published over GraphQL as-is."""
     Latest = "Latest"
+    LastUpdate = "LastUpdate"
     MostViewed = "MostViewed"
     Loved = "Loved"
     Longest = "Longest"
@@ -37,14 +38,16 @@ class SearchField(str, Enum):
     Tag = "Tag"
 
 
+_DEFAULT_SORT = [("lastModifyTime", -1)]
+
 #: Sort specification per option. Anything unrecognised falls back to newest on disk.
 _SORT_BY_OPTION = {
     VideoSortOption.Latest.value: [("lastViewTime", -1)],
+    VideoSortOption.LastUpdate.value: _DEFAULT_SORT,
     VideoSortOption.MostViewed.value: [("viewCount", -1), ("lastViewTime", -1)],
     VideoSortOption.Loved.value: [("loved", -1), ("lastViewTime", -1)],
     VideoSortOption.Longest.value: [("duration", -1)],
 }
-_DEFAULT_SORT = [("lastModifyTime", -1)]
 
 
 @dataclass(slots=True)
@@ -94,12 +97,14 @@ class CatalogService:
         dir_metadata_service: DirMetadataService,
         resource_handler_service: ResourceHandlerService,
         ffmpeg_service: FFmpegService,
+        path_locks: PathLockRegistry,
     ):
         self.settings = settings
         self.tagOperationService = tag_operation_service
         self.dirMetadataService = dir_metadata_service
         self.resourceHandlerService = resource_handler_service
         self.ffmpegService = ffmpeg_service
+        self.pathLocks = path_locks
 
     # ------------------------------------------------------------------
     # Reads
@@ -162,7 +167,7 @@ class CatalogService:
 
         return VideoSearchPage(
             videos=videos,
-            locked_paths=await find_locked_paths(v.path for v in videos),
+            locked_paths=await self.pathLocks.locked_paths(v.path for v in videos),
             total_count=total_count,
             page_size=criteria.page_size,
             page_number=criteria.page_number,
@@ -299,18 +304,18 @@ class CatalogService:
 
     async def is_locked(self, db_path: str) -> bool:
         """
-        Whether a migration currently holds this path.
+        Whether unfinished background work currently holds this path.
 
         :param db_path: Path in DB format.
         :type db_path: str
-        :return: True if the file is mid-migration.
+        :return: True if the file is spoken for, e.g. mid-migration.
         :rtype: bool
         """
-        return db_path in await find_locked_paths([db_path])
+        return await self.pathLocks.is_locked(db_path)
 
     async def locked_paths(self, db_paths) -> set[str]:
         """
-        Which of the given paths a migration currently holds.
+        Which of the given paths unfinished background work currently holds.
 
         Bulk by design: a list of videos costs one lookup rather than one per row.
 
@@ -318,7 +323,7 @@ class CatalogService:
         :return: The subset that is locked.
         :rtype: set[str]
         """
-        return await find_locked_paths(db_paths)
+        return await self.pathLocks.locked_paths(db_paths)
 
     async def assert_videos_unlocked(self, video_ids: list[str]) -> None:
         """
@@ -336,7 +341,7 @@ class CatalogService:
             {"_id": {"$in": [ObjectId(vid) for vid in video_ids]}}
         ).to_list()
 
-        locked_paths = await find_locked_paths(v.path for v in videos)
+        locked_paths = await self.pathLocks.locked_paths(v.path for v in videos)
         for video in videos:
             if video.path in locked_paths:
                 raise InputValidationError(

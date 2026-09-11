@@ -62,6 +62,15 @@ export class Homepage {
     { initialValue: this.gqlService.initialSignalData<SearchVideosDetail>(this.INITIAL_VIDEOS_SEARCH_RESULT) }
   );
 
+  // Last Updated — newest on disk, which is not the same rail as Latest Viewed:
+  // a file added months ago can be the one watched most recently, and vice versa.
+  lastUpdatedVideos = toSignal(
+    this.triggerObservable(VideoSortOption.LastUpdate).pipe(
+      switchMap(() => this.gqlService.searchVideosQuery(SearchFrom.FrontalPage, VideoSortOption.LastUpdate))
+    ),
+    { initialValue: this.gqlService.initialSignalData<SearchVideosDetail>(this.INITIAL_VIDEOS_SEARCH_RESULT) }
+  );
+
   // Most Viewed
   mostViewedVideos = toSignal(
     this.triggerObservable(VideoSortOption.MostViewed).pipe(
@@ -81,6 +90,7 @@ export class Homepage {
   constructor() {
     this.SearchTrigger.next(VideoSortOption.Loved);
     this.SearchTrigger.next(VideoSortOption.Latest);
+    this.SearchTrigger.next(VideoSortOption.LastUpdate);
     this.SearchTrigger.next(VideoSortOption.MostViewed);
     this.tagsTrigger.next();
 
@@ -98,6 +108,9 @@ export class Homepage {
         if (sectionContainsAffectedId(this.latestViewedVideos())) {
           this.SearchTrigger.next(VideoSortOption.Latest);
         }
+        if (sectionContainsAffectedId(this.lastUpdatedVideos())) {
+          this.SearchTrigger.next(VideoSortOption.LastUpdate);
+        }
         if (sectionContainsAffectedId(this.mostViewedVideos())) {
           this.SearchTrigger.next(VideoSortOption.MostViewed);
         }
@@ -106,11 +119,12 @@ export class Homepage {
       });
   }
 
-  OnMoreClick(section: 'loved' | 'latest' | 'mostViewed'){
+  OnMoreClick(section: 'loved' | 'latest' | 'lastUpdate' | 'mostViewed'){
     const option = () => {
       switch(section){
         case 'loved': return VideoSortOption.Loved;
         case 'latest': return VideoSortOption.Latest;
+        case 'lastUpdate': return VideoSortOption.LastUpdate;
         case 'mostViewed': return VideoSortOption.MostViewed;
         default: { return VideoSortOption.Loved; }
       }

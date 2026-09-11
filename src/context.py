@@ -12,6 +12,7 @@ from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.task_runner import TaskRunner
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
@@ -41,6 +42,7 @@ _tag_operation_service: TagOperationService | None = None
 _series_service: SeriesService | None = None
 _migration_service: MigrationService | None = None
 _task_runner: TaskRunner | None = None
+_path_lock_registry: PathLockRegistry | None = None
 
 def get_cache_service(settings: Settings = Depends(get_settings)):
     global _cache_service
@@ -98,17 +100,44 @@ def get_thumbnail_service(
     )
 ThumbnailServiceDep = Annotated[ThumbnailService, Depends(get_thumbnail_service)]
 
+def get_path_lock_registry(
+    resource_handler_service = Depends(get_resource_handler_service),
+    dir_metadata_service = Depends(get_dir_metadata_service),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    The registry that tells readers whether a file is spoken for by unfinished work.
+
+    Wiring it up is this module's job precisely because it is the only place allowed to
+    know both sides: the features that hold paths, and the features that display them.
+    Registration happens here rather than at startup so the registry is never handed out
+    half-built — an empty one would silently report every file as free.
+    """
+    global _path_lock_registry
+    if _path_lock_registry is None:
+        registry = PathLockRegistry()
+        registry.register(
+            MIGRATION_EXECUTOR_KEY,
+            get_migration_service(
+                resource_handler_service, dir_metadata_service, settings
+            ),
+        )
+        _path_lock_registry = registry
+    return _path_lock_registry
+
 def get_browse_file_service(
     settings: Settings = Depends(get_settings),
     dir_metadata_service = Depends(get_dir_metadata_service), 
     resource_handler_service = Depends(get_resource_handler_service),
-    ffmpeg_service = Depends(get_ffmpeg_service)
+    ffmpeg_service = Depends(get_ffmpeg_service),
+    path_locks = Depends(get_path_lock_registry)
 ):
     return BrowseFileService(
-        settings=settings, 
-        dir_metadata_service=dir_metadata_service, 
+        settings=settings,
+        dir_metadata_service=dir_metadata_service,
         resource_handler_service=resource_handler_service,
-        ffmpegService=ffmpeg_service
+        ffmpegService=ffmpeg_service,
+        path_locks=path_locks
     )
 # BrowseFileServiceDep = Annotated[BrowseFileService, Depends(get_browse_file_service)]
 
@@ -133,6 +162,7 @@ def get_catalog_service(
     dir_metadata_service = Depends(get_dir_metadata_service),
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
+    path_locks = Depends(get_path_lock_registry),
 ):
     return CatalogService(
         settings=settings,
@@ -140,6 +170,7 @@ def get_catalog_service(
         dir_metadata_service=dir_metadata_service,
         resource_handler_service=resource_handler_service,
         ffmpeg_service=ffmpeg_service,
+        path_locks=path_locks,
     )
 
 def get_migration_service(

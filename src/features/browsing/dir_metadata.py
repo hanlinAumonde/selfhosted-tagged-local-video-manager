@@ -8,6 +8,12 @@ class DirMetadataModel(Document):
     total_size: float
     last_modified_time: float
 
+    # Whether a user deliberately created this directory. Not derivable from the
+    # filesystem, and not from the existence of this document either: metadata is
+    # persisted for every directory that gets walked, zero aggregates included. The
+    # browser needs it to keep listing a folder someone just made and has yet to fill.
+    user_created: bool = False
+
     @before_event(Insert, Replace)
     def validate_category(self):
         valid = get_settings().get_valid_categories()

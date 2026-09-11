@@ -77,6 +77,54 @@ class DirMetadataService:
         )
         self._cache.set(self._cache_key(category, path), (total_size, last_modified_time))
 
+    async def mark_user_created(self, category: str, path: str) -> None:
+        """
+        Record that a user deliberately created this directory.
+
+        Only the flag is written. Size and mtime go in ``$setOnInsert`` so marking a
+        directory that already has real aggregates does not zero them — the caller may be
+        marking one that is about to be recalculated, or one that already was.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :rtype: None
+        """
+        await DirMetadataModel.get_pymongo_collection().update_one(
+            {"category": category, "path": path},
+            {
+                "$set": {"user_created": True},
+                "$setOnInsert": {
+                    "category": category,
+                    "path": path,
+                    "total_size": 0.0,
+                    "last_modified_time": 0.0,
+                },
+            },
+            upsert=True,
+        )
+
+    async def is_user_created(self, category: str, path: str) -> bool:
+        """
+        Whether a user deliberately created this directory.
+
+        Read straight from the database: the cache holds only the size/mtime pair, and
+        this flag is asked about exactly when that pair is uninformative.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :return: True if the directory was created through the application.
+        :rtype: bool
+        """
+        doc = await DirMetadataModel.find_one(
+            DirMetadataModel.category == category,
+            DirMetadataModel.path == path,
+        )
+        return bool(doc is not None and doc.user_created)
+
     async def bulk_set_metadata(self, category: str, entries: dict[str, tuple[float, float]]) -> None:
         """
         Bulk upsert to database, then batch update cache.

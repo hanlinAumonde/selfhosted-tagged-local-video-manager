@@ -26,7 +26,8 @@ from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
-from src.features.migration.migration_service import MigrationService
+from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.platform.jobs.path_locks import PathLockRegistry
 from src.features.catalog.tag_operation_service import TagOperationService
 from src.features.playback.thumbnail_service import ThumbnailService
 
@@ -141,17 +142,37 @@ def mock_thumbnail_service() -> MagicMock:
 
 
 @pytest.fixture
+def real_path_lock_registry(
+    real_dir_metadata_service: DirMetadataService,
+    real_resource_handler_service: ResourceHandlerService,
+) -> PathLockRegistry:
+    """The registry as the composition root builds it: migration registered as a provider,
+    so lock state still comes from real task documents."""
+    registry = PathLockRegistry()
+    registry.register(
+        MIGRATION_EXECUTOR_KEY,
+        MigrationService(
+            resource_handler_service=real_resource_handler_service,
+            dir_metadata_service=real_dir_metadata_service,
+        ),
+    )
+    return registry
+
+
+@pytest.fixture
 def real_browse_file_service(
     integration_settings: Settings,
     real_dir_metadata_service: DirMetadataService,
     real_resource_handler_service: ResourceHandlerService,
     mock_ffmpeg_service: MagicMock,
+    real_path_lock_registry: PathLockRegistry,
 ) -> BrowseFileService:
     return BrowseFileService(
         settings=integration_settings,
         dir_metadata_service=real_dir_metadata_service,
         resource_handler_service=real_resource_handler_service,
         ffmpegService=mock_ffmpeg_service,
+        path_locks=real_path_lock_registry,
     )
 
 
@@ -179,6 +200,7 @@ def real_catalog_service(
     real_dir_metadata_service: DirMetadataService,
     real_resource_handler_service: ResourceHandlerService,
     mock_ffmpeg_service: MagicMock,
+    real_path_lock_registry: PathLockRegistry,
 ) -> CatalogService:
     return CatalogService(
         settings=integration_settings,
@@ -186,6 +208,7 @@ def real_catalog_service(
         dir_metadata_service=real_dir_metadata_service,
         resource_handler_service=real_resource_handler_service,
         ffmpeg_service=mock_ffmpeg_service,
+        path_locks=real_path_lock_registry,
     )
 
 

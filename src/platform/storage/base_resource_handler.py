@@ -69,6 +69,22 @@ class BaseResourceHandler(ABC):
         """
         ...
 
+    @abstractmethod
+    def create_directory(self, path: str) -> None:
+        """
+        Create a directory at the given path.
+
+        Refusing an occupied path is part of the contract rather than a convenience: the
+        caller reports it as a name already taken, and must never end up adopting a
+        directory — or a file — that something else put there.
+
+        :param path: FS-format path of the directory to create.
+        :type path: str
+        :rtype: None
+        :raises FileExistsError: If anything already occupies that path.
+        """
+        ...
+
     # --- File content read/write ---
 
     @abstractmethod

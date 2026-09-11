@@ -198,6 +198,18 @@
                 </span>
               } @else {
                 <span class="truncate font-medium" [matTooltip]="item.node.name">{{ item.node.name }}</span>
+                <!-- Only a search result has one: it says which sub-directory it came from. -->
+                @if (item.node.relativePath) {
+                  <span
+                    class="ml-2 shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs
+                           whitespace-nowrap max-w-40 truncate font-mono
+                           bg-gray-200 text-gray-600 dark:bg-neutral-600 dark:text-gray-300"
+                    [matTooltip]="'In ' + nodeDirectory(item.node)"
+                  >
+                    <mat-icon class="text-sm! w-3.5! h-3.5! leading-none" fontIcon="folder"></mat-icon>
+                    {{ item.node.relativePath }}
+                  </span>
+                }
                 @if (isLocked(item.node)) {
                   <span
                     class="ml-2 shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs whitespace-nowrap

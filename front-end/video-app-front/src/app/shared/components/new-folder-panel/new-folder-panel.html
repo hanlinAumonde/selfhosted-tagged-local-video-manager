@@ -1,0 +1,29 @@
+<h2 mat-dialog-title>New Folder</h2>
+<mat-dialog-content>
+  <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
+    Created in <span class="font-mono font-bold">{{ data.parentPath || 'the current directory' }}</span>
+  </p>
+  <form [formGroup]="folderForm" (ngSubmit)="createFolder()">
+    <mat-form-field class="w-full">
+      <mat-label>Folder name</mat-label>
+      <input matInput formControlName="name" cdkFocusInitial autocomplete="off" />
+      @if (name.invalid && (name.dirty || name.touched)) {
+        <mat-error>{{ errorMessage() }}</mat-error>
+      }
+    </mat-form-field>
+  </form>
+</mat-dialog-content>
+<mat-dialog-actions>
+  @if (isSaving()) {
+    <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+  }
+  <button matButton mat-dialog-close [disabled]="isSaving()">Cancel</button>
+  <button
+    matButton
+    [disabled]="folderForm.invalid || isSaving()"
+    (click)="createFolder()"
+  >
+    Create
+  </button>
+</mat-dialog-actions>
+<app-toast-displayer />

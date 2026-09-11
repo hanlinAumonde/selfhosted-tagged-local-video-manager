@@ -237,12 +237,11 @@ export class FileBrowseTable {
   }
 
   openMigrationPanel(video: BrowsedVideo) {
-    const currentDir = this.currentPath().join('/');
     const data: MigrationPanelData = {
       sourceVideoId: video.id,
       sourceVideoName: video.name,
       sourceFileSize: video.size,
-      sourceCurrentDir: currentDir || '/',
+      sourceCurrentDir: this.nodeDirectory(video) || '/',
     };
 
     const dialogRef = this.dialog.open(MigrationPanel, {
@@ -280,6 +279,19 @@ export class FileBrowseTable {
 
   isSelected(id: string): boolean {
     return this.selectedIds().has(id);
+  }
+
+  /**
+   * The directory this row actually sits in, in DB path format.
+   *
+   * For a listing that is the directory on screen. A search result may have come from any
+   * depth below it, and carries that offset in `relativePath` — a row's own location is
+   * the only thing an operation on it may be told about.
+   */
+  nodeDirectory(node: BrowsedVideo): string {
+    return [this.currentPath().join('/'), node.relativePath]
+      .filter(part => !!part)
+      .join('/');
   }
 
   /**

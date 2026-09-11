@@ -81,7 +81,10 @@ export class Search {
   };
 
   readonly sortOptions = [
-    { value: VideoSortOption.Latest, label: 'Latest' },
+    // "Latest" orders by lastViewTime, so it is spelled out: the option next to it
+    // orders by the file's own mtime, and "Latest" alone reads as either.
+    { value: VideoSortOption.Latest, label: 'Latest Viewed' },
+    { value: VideoSortOption.LastUpdate, label: 'Last Updated' },
     { value: VideoSortOption.MostViewed, label: 'Most Viewed' },
     { value: VideoSortOption.Longest, label: 'Longest' },
     { value: VideoSortOption.Loved, label: 'Loved' },

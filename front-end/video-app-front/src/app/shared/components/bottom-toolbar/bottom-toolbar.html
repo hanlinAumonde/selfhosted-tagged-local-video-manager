@@ -40,7 +40,33 @@
             <mat-icon fontIcon="arrow_forward"></mat-icon>
           </button>
         </div>
-        <span class="bg-gray-400 dark:bg-neutral-600 mx-4 px-4 py-2 rounded-lg font-medium shrink-0">Current path:</span>
+        <!-- What the table below is showing: a directory, or a set of search results. -->
+        <span
+          class="bg-gray-400 dark:bg-neutral-600 mx-4 px-3 py-2 rounded-lg flex items-center shrink-0"
+          [matTooltip]="isSearching() ? 'Search result' : 'Current path'"
+        >
+          <mat-icon [fontIcon]="isSearching() ? 'search' : 'folder'"></mat-icon>
+        </span>
+        @if (isSearching()) {
+          <button
+            mat-icon-button
+            class="shrink-0"
+            matTooltip="Back to browsing"
+            (click)="exitSearch.emit()"
+          >
+            <mat-icon fontIcon="keyboard_return"></mat-icon>
+          </button>
+          <div class="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+            @for (criterion of searchSummary(); track $index) {
+              <span
+                class="bg-neutral-800 px-2 py-0.5 rounded-lg font-mono truncate max-w-60 shrink-0 text-gray-200"
+                [title]="criterion"
+              >
+                {{ criterion }}
+              </span>
+            }
+          </div>
+        } @else {
         <div class="flex items-center min-w-0 flex-1 overflow-hidden font-mono font-bold text-gray-200" #pathContainer>
           @if (hasOverflow()) {
             <button
@@ -73,34 +99,62 @@
             }
           }
         </div>
+        }
       </div>
-      <div class="flex items-end">
-        <div class="px-4 py-2 bg-neutral-500 gap-2 flex items-center
-                  text-white rounded-lg font-medium transition-colors"
+      <div class="flex items-end gap-2">
+        <button
+          class="px-4 py-2 bg-neutral-500 gap-2 flex items-center text-white rounded-lg
+                 font-medium hover:bg-neutral-400 transition-colors"
+          [matMenuTriggerFor]="optionsMenu"
         >
-          <span class="text-md">({{ selectedCount() }}) Batch</span>
-          <button class="flex items-center hover:bg-neutral-400 hover:disabled:bg-neutral-500
-                         disabled:cursor-no-drop rounded-full transition-colors"
-            [matMenuTriggerFor]="batchMenu" [disabled]="selectedCount() == 0">
-            <mat-icon fontIcon="arrow_drop_up"></mat-icon>
+          <mat-icon fontIcon="tune"></mat-icon>
+          <span class="text-md">Options</span>
+          <mat-icon fontIcon="arrow_drop_up"></mat-icon>
+        </button>
+        <mat-menu #optionsMenu>
+          <button
+            mat-menu-item
+            [disabled]="!canSearch()"
+            [title]="canSearch() ? 'Search this directory and everything below it' : 'Enter a resource directory first'"
+            (click)="openSearchPanel()"
+          >
+            <mat-icon fontIcon="search"></mat-icon>
+            <span>Search</span>
           </button>
-          <mat-menu #batchMenu>
-            <button
-              mat-menu-item
-              (click)="openBatchOperationPanel()"
-            >
-              <mat-icon fontIcon="edit"></mat-icon>
-              <span>Edit</span>
-            </button>
-            <button
-              mat-menu-item
-              (click)="openBatchDeleteCheckPanel()"
-            >
-              <mat-icon fontIcon="delete"></mat-icon>
-              <span>Delete</span>
-            </button>
-          </mat-menu>
-        </div>
+          <button
+            mat-menu-item
+            [disabled]="!canCreateFolder()"
+            [title]="canCreateFolder() ? 'Create a new folder here' : 'Enter a resource directory first'"
+            (click)="openNewFolderPanel()"
+          >
+            <mat-icon fontIcon="create_new_folder"></mat-icon>
+            <span>New folder</span>
+          </button>
+          <button
+            mat-menu-item
+            [matMenuTriggerFor]="batchMenu"
+            [disabled]="selectedCount() === 0"
+          >
+            <mat-icon fontIcon="checklist"></mat-icon>
+            <span>Batch ({{ selectedCount() }})</span>
+          </button>
+        </mat-menu>
+        <mat-menu #batchMenu>
+          <button
+            mat-menu-item
+            (click)="openBatchOperationPanel()"
+          >
+            <mat-icon fontIcon="edit"></mat-icon>
+            <span>Edit</span>
+          </button>
+          <button
+            mat-menu-item
+            (click)="openBatchDeleteCheckPanel()"
+          >
+            <mat-icon fontIcon="delete"></mat-icon>
+            <span>Delete</span>
+          </button>
+        </mat-menu>
       </div>
 
     </div>

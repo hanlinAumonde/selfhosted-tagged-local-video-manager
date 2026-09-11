@@ -143,6 +143,22 @@ async def test_search_videos_calls_ffmpeg_when_duration_missing(
     assert duration == 120.0
 
 
+async def test_search_videos_last_update_sort(execute_gql, video_factory):
+    # Given two videos where the newest on disk is the least recently viewed
+    await video_factory(name="added_late", lastModifyTime=300.0, lastViewTime=100.0)
+    await video_factory(name="watched_late", lastModifyTime=100.0, lastViewTime=300.0)
+
+    # When SearchVideos is asked for sortBy "LastUpdate"
+    result = await execute_gql(
+        SEARCH_VIDEOS, {"input": make_search_input(sortBy="LastUpdate")}
+    )
+
+    # Then the published enum accepts it and the videos come back newest-on-disk first
+    assert_no_errors(result)
+    names = [v["name"] for v in result.data["SearchVideos"]["videos"]]
+    assert names == ["added_late", "watched_late"]
+
+
 async def test_search_videos_invalid_page_number(execute_gql, init_db):
     result = await execute_gql(
         SEARCH_VIDEOS, {"input": make_search_input(currentPageNumber=0)}

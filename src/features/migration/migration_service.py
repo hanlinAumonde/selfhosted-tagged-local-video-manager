@@ -26,49 +26,6 @@ logger = get_logger("migration_service")
 MIGRATION_EXECUTOR_KEY = "migration"
 
 
-async def find_locked_paths(db_paths: Iterable[str]) -> set[str]:
-    """
-    Find which of the given paths are tied up by a migration that has not settled.
-
-    A path counts as locked whether it is a task's source, its target, or its renamed
-    target: a file on its way out and a file about to be overwritten both need protecting.
-
-    Bulk by design — resolvers that return many videos call this once for the whole page
-    instead of asking per video, so marking a directory listing costs a single query.
-
-    :param db_paths: Paths in DB format. Empty or falsy entries are ignored.
-    :type db_paths: Iterable[str]
-    :return: The subset of the input that is currently locked. Empty if nothing matches.
-    :rtype: set[str]
-    """
-    wanted = {path for path in db_paths if path}
-    if not wanted:
-        return set()
-
-    active_statuses = [
-        s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES
-    ]
-    path_list = list(wanted)
-    tasks = await MigrationTaskModel.find(
-        {
-            "status": {"$in": active_statuses},
-            "$or": [
-                {"source_path": {"$in": path_list}},
-                {"target_path": {"$in": path_list}},
-                {"renamed_target_path": {"$in": path_list}},
-            ],
-        }
-    ).to_list()
-
-    # A matched task may reference paths outside the requested set, so intersect rather
-    # than taking every path it mentions.
-    return {
-        path
-        for task in tasks
-        for path in (task.source_path, task.target_path, task.renamed_target_path)
-        if path in wanted
-    }
-
 @dataclass
 class MigrationPreflightResult:
     valid: bool
@@ -421,6 +378,46 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         )
         return tasks, total_count
 
+    async def locked_paths(self, db_paths: Iterable[str]) -> set[str]:
+        """
+        Report which of the given paths this feature is holding.
+
+        Implements ``PathLockProvider``, which is how readers such as the catalogue and the
+        directory browser learn that a file is spoken for without importing this feature.
+
+        :param db_paths: Paths in DB format. Empty or falsy entries are ignored.
+        :type db_paths: Iterable[str]
+        :return: The subset of the input held by a task that has not settled.
+        :rtype: set[str]
+        """
+        wanted = {path for path in db_paths if path}
+        if not wanted:
+            return set()
+    
+        active_statuses = [
+            s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES
+        ]
+        path_list = list(wanted)
+        tasks = await MigrationTaskModel.find(
+            {
+                "status": {"$in": active_statuses},
+                "$or": [
+                    {"source_path": {"$in": path_list}},
+                    {"target_path": {"$in": path_list}},
+                    {"renamed_target_path": {"$in": path_list}},
+                ],
+            }
+        ).to_list()
+    
+        # A matched task may reference paths outside the requested set, so intersect rather
+        # than taking every path it mentions.
+        return {
+            path
+            for task in tasks
+            for path in (task.source_path, task.target_path, task.renamed_target_path)
+            if path in wanted
+        }
+
     async def is_file_locked(self, db_path: str) -> bool:
         """
         Check whether a path is tied up by a migration that has not settled.
@@ -434,7 +431,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :return: True if any non-terminal task references this path.
         :rtype: bool
         """
-        return db_path in await find_locked_paths([db_path])
+        return db_path in await self.locked_paths([db_path])
 
     # ------------------------------------------------------------------
     # Filesystem helpers

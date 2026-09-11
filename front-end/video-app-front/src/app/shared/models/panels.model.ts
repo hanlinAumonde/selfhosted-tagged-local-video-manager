@@ -62,6 +62,26 @@ export interface DeleteCheckPanelData {
 export type SeriesAction = 'set' | 'clear';
 export type TagAction = 'append' | 'remove';
 
+export interface NewFolderPanelData {
+  /** The directory the folder goes into, in DB path format. */
+  parentPath: string;
+}
+
+export interface SearchPanelData {
+  /** The directory the search runs in, in DB path format. */
+  directoryPath: string;
+}
+
+/**
+ * What the search panel asks for. Blank fields are not filters — the panel always sends
+ * all three, and the backend ignores the ones that would narrow nothing.
+ */
+export interface DirectorySearchCriteria {
+  name: string;
+  author: string;
+  tags: string[];
+}
+
 export interface MigrationPanelData {
   sourceVideoId: string;
   sourceVideoName: string;

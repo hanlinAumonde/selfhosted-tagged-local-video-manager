@@ -33,6 +33,16 @@ export const RECORD_VIDEO_VIEW = gql`
   }
 `;
 
+export const CREATE_DIRECTORY = gql`
+  mutation CreateDirectory($input: CreateDirectoryInput!) {
+    createDirectory(input: $input) {
+      success
+      name
+      path
+    }
+  }
+`;
+
 export const DELETE_VIDEO = gql`
   mutation DeleteVideo($videoId: ID!) {
     deleteVideo(videoId: $videoId) {

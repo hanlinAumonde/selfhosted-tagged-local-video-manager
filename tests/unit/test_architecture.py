@@ -107,6 +107,54 @@ class TestResolversDoNotQueryTheDatabase:
         assert offenders == {}, f"resolvers importing ODM documents: {offenders}"
 
 
+#: Features whose job is to run background work over what the other features own. They
+#: read the catalogue and the directory tree; nothing reads them back.
+JOB_FEATURES = {"migration"}
+
+
+def _owning_feature(path: Path) -> str:
+    """Which feature package a file under features/ belongs to."""
+    return path.relative_to(SRC / "features").parts[0]
+
+
+class TestJobFeaturesAreLeaves:
+    """A feature that runs background work depends on the features it acts upon —
+    migration moves catalog records and updates browsing's directory metadata. The reverse
+    must not happen.
+
+    It is tempting when a reader needs one fact a job knows ("is this file spoken for?"),
+    and importing the job's helper is the shortest way to get it. The cost only shows up
+    later: the two features can no longer be read, tested or reused apart, and the next
+    kind of job has nowhere to publish the same fact from. Such a fact belongs behind an
+    abstraction in platform/ that both sides can reach — ``PathLockRegistry`` is the one
+    that exists for this question."""
+
+    def test_no_feature_imports_a_job_feature(self):
+        offenders = {}
+        for path in sorted((SRC / "features").rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            owner = _owning_feature(path)
+            if owner in JOB_FEATURES:
+                continue
+            leaked = sorted(
+                name for name in _imported_modules(path)
+                if _feature_of(name) in JOB_FEATURES
+            )
+            if leaked:
+                offenders[_relative(path)] = leaked
+
+        assert offenders == {}, f"features importing a job feature: {offenders}"
+
+
+def _feature_of(module_name: str) -> str | None:
+    """Which feature package a module name belongs to, or None if it names no feature."""
+    parts = module_name.split(".")
+    if len(parts) >= 3 and parts[0] == "src" and parts[1] == "features":
+        return parts[2]
+    return None
+
+
 class TestPlatformStaysGeneric:
     """The platform packages are the reusable core: they may be imported by features, and
     must never import one."""
