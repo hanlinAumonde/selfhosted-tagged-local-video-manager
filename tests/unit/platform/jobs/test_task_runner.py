@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from src.features.migration.migration_task import TaskStatus
 from src.platform.jobs.progress import ProgressFrame
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.jobs.task_runner import TaskRunner
 
 pytestmark = pytest.mark.unit
 
-EXECUTOR_KEY = "migration"
+EXECUTOR_KEY = "demo"
 
 
 def _frame(task_id: str, status=TaskStatus.PROCESSING, current=0) -> ProgressFrame:
