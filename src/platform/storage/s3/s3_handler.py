@@ -207,6 +207,36 @@ class S3ResourceHandler(BaseResourceHandler):
 
         bucket.Object(marker_key).put(Body=b"")
 
+    def delete_directory(self, path: str) -> None:
+        """
+        Remove the marker object that stands in for this directory.
+
+        There is nothing else to unlink: the prefix itself is not a thing, so once the
+        marker goes the "directory" stops existing.
+        """
+        marker_key = path.rstrip("/") + "/"
+        if not self.is_directory_empty(path):
+            raise OSError(f"S3 prefix is not empty: {marker_key}")
+        self._get_object(marker_key).delete()
+
+    def is_directory_empty(self, path: str) -> bool:
+        """
+        Whether the marker object is the only thing under the prefix.
+
+        Two keys are enough to answer it: the marker, plus the first thing that is not
+        the marker.
+        """
+        pseudo_name, _ = self._get_pseudo_name_from_key(path)
+        bucket = self._get_bucket(pseudo_name)
+        marker_key = path.rstrip("/") + "/"
+
+        listing = bucket.meta.client.list_objects_v2(
+            Bucket=bucket.name, Prefix=marker_key, MaxKeys=2
+        )
+        return all(
+            obj["Key"] == marker_key for obj in listing.get("Contents", [])
+        )
+
     # ------------------------------------------------------------------
     # File content read/write
     # ------------------------------------------------------------------

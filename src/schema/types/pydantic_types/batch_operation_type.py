@@ -1,7 +1,8 @@
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.config import get_settings
+from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
 from src.schema.types.pydantic_types.fileBrowe_type import RelativePathInputModel
 
 class SeriesOrderEntryInputModel(BaseModel):
@@ -27,10 +28,10 @@ class SeriesOperationInputModel(BaseModel):
 
 
 class TagsOperationMappingInputModel(BaseModel):
-    append: bool
-    tags: list[str]
+    addTags: list[str] = Field(default_factory=list)
+    removeTags: list[str] = Field(default_factory=list)
 
-    @field_validator("tags", mode="after")
+    @field_validator("addTags", "removeTags", mode="after")
     @classmethod
     def validate_tags(cls, v: list[str]) -> list[str]:
         settings = get_settings()
@@ -44,6 +45,21 @@ class TagsOperationMappingInputModel(BaseModel):
                 raise ValueError(f"Tag '{tag}' too long (max {validation.tag_max_length})")
 
         return v
+
+    @model_validator(mode="after")
+    def reject_tags_named_in_both_directions(self) -> "TagsOperationMappingInputModel":
+        """
+        A tag in both lists says nothing about what the caller wants.
+
+        Picking a winner would let them believe a tag was added when it was taken away,
+        or the reverse, with nothing in the result to tell them apart.
+        """
+        overlap = sorted(set(self.addTags) & set(self.removeTags))
+        if overlap:
+            raise ValueError(
+                f"Tags cannot be both added and removed: {', '.join(overlap)}"
+            )
+        return self
 
 
 class BatchOperationInputModel(BaseModel):
@@ -65,3 +81,6 @@ class VideosBatchOperationInputModel(BatchOperationInputModel):
     videoIds: list[str]
     relativePath: RelativePathInputModel
     seriesOperation: Optional[SeriesOperationInputModel] = None
+
+    #: Only meaningful when deleting by directory: what becomes of the folder itself.
+    directoryDeletion: Optional[DirectoryDeletionStrategy] = None

@@ -10,7 +10,7 @@ from src.config import Settings
 from src.features.catalog.video import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
-from src.features.browsing.dir_metadata_service import DirMetadataService
+from src.features.browsing.dir_metadata_service import DirFlags, DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.base_file_entry import BaseFileEntry
@@ -193,7 +193,7 @@ class BrowseFileService:
         category = abs_path.category
         handler = self.resourceHandlerService.get_handler(category)
 
-        directory_entries: list[BrowseEntry] = []
+        sub_directories: list[tuple[AbsolutePath, str]] = []
         pending: list[_PendingVideo] = []
 
         with handler.list_directory(abs_path.FS_format_path()) as entries:
@@ -205,11 +205,7 @@ class BrowseFileService:
                         handler=handler
                     )
                     if entry.is_dir():
-                        entry_node = await self._get_directory_node(
-                            entry_path, entry.name, skipCache, recursiveCalculation
-                        )
-                        if entry_node is not None:
-                            directory_entries.append(entry_node)
+                        sub_directories.append((entry_path, entry.name))
                     elif entry.is_file() and handler.is_video_file(entry.name):
                         stat = entry.stat()
                         pending.append(
@@ -224,6 +220,23 @@ class BrowseFileService:
                 except OSError as e:
                     logger.exception(f"Error processing file {entry.path}: {e}")
                     continue
+
+        # One lookup answers "did a user make this?" and "did a user delete this?" for
+        # every sub-directory at once; per-row it would be a query per listed folder.
+        flags = await self.dirMetadataService.get_flags(
+            category, (path.DB_format_path() for path, _ in sub_directories)
+        )
+        directory_entries: list[BrowseEntry] = []
+        for entry_path, name in sub_directories:
+            entry_node = await self._get_directory_node(
+                entry_path,
+                name,
+                skipCache,
+                recursiveCalculation,
+                flags=flags[entry_path.DB_format_path()],
+            )
+            if entry_node is not None:
+                directory_entries.append(entry_node)
 
         if not pending:
             return directory_entries
@@ -359,9 +372,14 @@ class BrowseFileService:
                                   name: str,
                                   skipCache: bool,
                                   recursiveCalculation: bool,
+                                  flags: DirFlags | None = None,
                                   list_when_empty: bool = False) -> DirectoryEntry | None:
         """
         Helper method to build a directory entry from its calculated metadata.
+
+        A directory a user deleted is dropped whatever its aggregates say. The aggregate
+        would normally be zero by then, but a delete that only half succeeded must not
+        put the row back as if nothing had happened.
 
         :param path: The absolute path of the directory.
         :type path: AbsolutePath
@@ -371,6 +389,9 @@ class BrowseFileService:
         :type skipCache: bool
         :param recursiveCalculation: Whether to calculate directory metadata recursively.
         :type recursiveCalculation: bool
+        :param flags: What a user decided about this directory, already looked up for the
+            whole listing. Defaults to "nothing was decided".
+        :type flags: DirFlags | None
         :param list_when_empty: Whether this row exists for a reason other than what it
             holds. Set for configured pseudo-names, whose place in the listing comes from
             the configuration rather than from anything found on the storage.
@@ -378,15 +399,17 @@ class BrowseFileService:
         :return: The node for the directory, or None if it holds nothing worth showing.
         :rtype: DirectoryEntry | None
         """
+        flags = flags or DirFlags()
+        if flags.user_deleted:
+            return None
+
         total_size, last_modified_time = await self.dirMetadataService.calculate_directory_metadata(
             directory_path=path,
             skipCache=skipCache,
             recursiveCalculation=recursiveCalculation
         )
         if total_size == 0.0 or last_modified_time == 0.0:
-            if not list_when_empty and not await self.dirMetadataService.is_user_created(
-                path.category, path.DB_format_path()
-            ):
+            if not list_when_empty and not flags.user_created:
                 return None
         return DirectoryEntry(
             name=name, size=total_size, last_modify_time=last_modified_time
@@ -429,20 +452,25 @@ class BrowseFileService:
         category = parent_path.category
         handler = self.resourceHandlerService.get_handler(category)
         new_fs_path = handler.join_path(parent_path.FS_format_path(), cleaned)
+        db_path = AbsolutePath.from_existing_path(
+            path=new_fs_path, category=category, handler=handler
+        ).DB_format_path()
 
         try:
             handler.create_directory(new_fs_path)
         except FileExistsError:
-            raise InputValidationError(
-                field="name", issue=f"'{cleaned}' already exists in this directory"
-            )
+            # A directory a user deleted is still on the storage whenever something else
+            # was inside it. Re-creating the same name is then a matter of clearing the
+            # mark: the storage was never asked to change in the first place, and
+            # touching it now would be a second chance to lose whatever is in there.
+            if not await self.dirMetadataService.is_user_deleted(category, db_path):
+                raise InputValidationError(
+                    field="name", issue=f"'{cleaned}' already exists in this directory"
+                )
         except (OSError, Exception) as e:
             logger.exception(f"Error creating directory {new_fs_path}: {e}")
             raise FileBrowseError(f"Error creating directory {cleaned}")
 
-        db_path = AbsolutePath.from_existing_path(
-            path=new_fs_path, category=category, handler=handler
-        ).DB_format_path()
         await self.dirMetadataService.mark_user_created(category, db_path)
         return db_path
 

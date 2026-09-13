@@ -14,6 +14,13 @@ class DirMetadataModel(Document):
     # browser needs it to keep listing a folder someone just made and has yet to fill.
     user_created: bool = False
 
+    # Whether a user deliberately took this directory away. Set when a "Delete all"
+    # removed the folder but the storage still holds something else inside it, so the
+    # directory is still there and would otherwise come back the moment anything under
+    # it aggregates above zero again. It is also what lets a later folder of the same
+    # name be created without touching the storage: the directory never left.
+    user_deleted: bool = False
+
     @before_event(Insert, Replace)
     def validate_category(self):
         valid = get_settings().get_valid_categories()

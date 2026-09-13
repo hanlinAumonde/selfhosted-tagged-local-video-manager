@@ -9,14 +9,13 @@ from src.schema.types.fileBrowse_type import (
     VideosBatchOperationInput
 )
 from src.features.browsing.batch_operation_service import BatchOperationService
+from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
 from src.features.catalog.catalog_service import CatalogService
 from src.features.browsing.browse_file_service import BrowseFileService
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 logger = get_logger("SubscriptionResolver")
-
-#class SubscriptionResolver:
 
 async def resolve_batch_operations(input: VideosBatchOperationInput,
                                    update: bool,
@@ -44,6 +43,10 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
 
     series_operation = validated_input.seriesOperation
     by_ids = validated_input.videoIds is not None and len(validated_input.videoIds) > 0
+
+    directory_deletion = _resolve_directory_deletion(
+        validated_input.directoryDeletion, update=update, by_ids=by_ids, dir_path=dir_path
+    )
 
     if series_operation is not None:
         if not update:
@@ -115,9 +118,54 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
         async for status in batchOperationService.batch_delete(
             dir_path=dir_path,
             videoIds=None,
-            fileEntries=all_entries
+            fileEntries=all_entries,
+            directoryDeletion=directory_deletion,
         ):
             yield BatchOperationStatus.from_service(status)
+
+
+def _resolve_directory_deletion(requested: DirectoryDeletionStrategy | None,
+                                update: bool,
+                                by_ids: bool,
+                                dir_path: AbsolutePath) -> DirectoryDeletionStrategy | None:
+    """
+    Decide what the request is asking of the directory itself.
+
+    Deleting by directory is always a "Delete all" on a folder, so it always gets an
+    answer; a client that names none means the folder stays, which is what the menu item
+    did before the choice existed. Everything else must not carry one at all — an update
+    never removes a folder, and a request that names videos is not about a folder.
+
+    :param requested: The strategy the client sent, if any.
+    :type requested: DirectoryDeletionStrategy | None
+    :param update: Whether this is a batch update rather than a batch delete.
+    :type update: bool
+    :param by_ids: Whether the request names videos rather than a directory.
+    :type by_ids: bool
+    :param dir_path: The path the request is about.
+    :type dir_path: AbsolutePath
+    :return: The strategy to hand the service, or None when the folder is not in play.
+    :rtype: DirectoryDeletionStrategy | None
+    :raises InputValidationError: If a strategy was sent where it means nothing.
+    """
+    if update or by_ids:
+        if requested is not None:
+            raise InputValidationError(
+                field="directoryDeletion",
+                issue="a deletion strategy only applies when deleting by directory",
+            )
+        return None
+
+    if dir_path.is_root_level() or dir_path.is_category_level():
+        if requested is not None:
+            raise InputValidationError(
+                field="directoryDeletion",
+                issue="only a directory on the storage can be deleted",
+            )
+        return None
+
+    return requested or DirectoryDeletionStrategy.KeepFolder
+
 
 def _expand_directory_path(dir_path: AbsolutePath, info: strawberry.Info) -> list[tuple[str, AbsolutePath]]:
     """

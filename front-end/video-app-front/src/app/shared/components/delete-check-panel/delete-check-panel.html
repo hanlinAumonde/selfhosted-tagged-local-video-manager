@@ -1,6 +1,27 @@
 <h2 mat-dialog-title class="text-red-500">Delete</h2>
 <mat-dialog-content>
-  Are you sure you want to delete {{ textToDelete() }}?
+  <p>Are you sure you want to delete {{ textToDelete() }}?</p>
+
+  @if (isDirectoryDelete) {
+    <mat-radio-group
+      class="flex flex-col gap-2 mt-4"
+      [value]="folderDisposition()"
+      (change)="folderDisposition.set($event.value)">
+      <mat-radio-button [value]="KeepFolder">
+        <span class="font-medium">Delete the videos, keep the folder</span>
+        <span class="block text-xs text-gray-500 dark:text-gray-400">
+          The folder stays in the browser, empty.
+        </span>
+      </mat-radio-button>
+      <mat-radio-button [value]="DeleteFolder" class="text-red-700">
+        <span class="font-medium">Delete the folder too</span>
+        <span class="block text-xs text-gray-500 dark:text-gray-400">
+          It leaves the storage when nothing else is inside it; otherwise whatever is
+          left stays where it is and only the folder stops being listed.
+        </span>
+      </mat-radio-button>
+    </mat-radio-group>
+  }
 </mat-dialog-content>
 <mat-dialog-actions>
   @if(isSaving()){
@@ -8,7 +29,7 @@
     <mat-progress-bar mode="indeterminate"></mat-progress-bar>
   }
   <button matButton mat-dialog-close cdkInitialFocus>No</button>
-  <button 
+  <button
     matButton
     [disabled]="isSaving()"
     (click)="confirmDelete()"

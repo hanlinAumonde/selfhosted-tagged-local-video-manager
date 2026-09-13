@@ -43,6 +43,11 @@ export type CreateMigrationTaskInput = {
   targetDirRelativePath: RelativePathInput;
 };
 
+export enum DirectoryDeletionStrategy {
+  DeleteFolder = 'DeleteFolder',
+  KeepFolder = 'KeepFolder'
+}
+
 export type DirectoryMetadataResult = {
   __typename?: 'DirectoryMetadataResult';
   lastModifiedTime: Scalars['Float']['output'];
@@ -338,8 +343,8 @@ export type SuggestionInput = {
 };
 
 export type TagsOperationMappingInput = {
-  append: Scalars['Boolean']['input'];
-  tags: Array<Scalars['String']['input']>;
+  addTags?: Array<Scalars['String']['input']>;
+  removeTags?: Array<Scalars['String']['input']>;
 };
 
 export type UpdateVideoMetadataInput = {
@@ -410,6 +415,7 @@ export type VideoTag = {
 
 export type VideosBatchOperationInput = {
   author?: InputMaybe<Scalars['String']['input']>;
+  directoryDeletion?: InputMaybe<DirectoryDeletionStrategy>;
   relativePath: RelativePathInput;
   seriesOperation?: InputMaybe<SeriesOperationInput>;
   tagsOperation?: InputMaybe<TagsOperationMappingInput>;

@@ -1,3 +1,6 @@
+from collections.abc import Iterable
+from dataclasses import dataclass
+
 from pymongo import UpdateOne
 
 from src.config import Settings
@@ -8,6 +11,18 @@ from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 logger = get_logger("dir_metadata_service")
+
+
+@dataclass(slots=True, frozen=True)
+class DirFlags:
+    """
+    What a listing needs to know about a directory that its aggregates cannot say.
+
+    Both answers come from the same document, so they are fetched together: asking them
+    one at a time would put two queries on every row of a listing.
+    """
+    user_created: bool = False
+    user_deleted: bool = False
 
 
 class DirMetadataService:
@@ -77,24 +92,27 @@ class DirMetadataService:
         )
         self._cache.set(self._cache_key(category, path), (total_size, last_modified_time))
 
-    async def mark_user_created(self, category: str, path: str) -> None:
+    async def _set_flags(self, category: str, path: str, flags: dict[str, bool]) -> None:
         """
-        Record that a user deliberately created this directory.
+        Write directory flags without disturbing the aggregates.
 
-        Only the flag is written. Size and mtime go in ``$setOnInsert`` so marking a
-        directory that already has real aggregates does not zero them — the caller may be
-        marking one that is about to be recalculated, or one that already was.
+        Only the named flags are written. Size and mtime go in ``$setOnInsert`` so
+        flagging a directory that already has real aggregates does not zero them — the
+        caller may be flagging one that is about to be recalculated, or one that already
+        was.
 
         :param category: The category of the directory.
         :type category: str
         :param path: The path of the directory, in DB format.
         :type path: str
+        :param flags: The flag fields to write and their values.
+        :type flags: dict[str, bool]
         :rtype: None
         """
         await DirMetadataModel.get_pymongo_collection().update_one(
             {"category": category, "path": path},
             {
-                "$set": {"user_created": True},
+                "$set": flags,
                 "$setOnInsert": {
                     "category": category,
                     "path": path,
@@ -104,6 +122,84 @@ class DirMetadataService:
             },
             upsert=True,
         )
+
+    async def mark_user_created(self, category: str, path: str) -> None:
+        """
+        Record that a user deliberately created — or deliberately kept — this directory.
+
+        Clearing ``user_deleted`` in the same write is what re-creating a folder over a
+        deleted one amounts to: the directory never left the storage, only the listing.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :rtype: None
+        """
+        await self._set_flags(
+            category, path, {"user_created": True, "user_deleted": False}
+        )
+
+    async def mark_user_deleted(self, category: str, path: str) -> None:
+        """
+        Record that a user deliberately took this directory away.
+
+        ``user_created`` is cleared in the same write: a folder someone kept and then
+        deleted must not go on being listed because of the earlier answer.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :rtype: None
+        """
+        await self._set_flags(
+            category, path, {"user_deleted": True, "user_created": False}
+        )
+
+    async def forget(self, category: str, path: str) -> None:
+        """
+        Drop everything recorded about a directory that no longer exists.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :rtype: None
+        """
+        await DirMetadataModel.get_pymongo_collection().delete_one(
+            {"category": category, "path": path}
+        )
+        self._cache.delete(self._cache_key(category, path))
+
+    async def get_flags(self, category: str, paths: Iterable[str]) -> dict[str, DirFlags]:
+        """
+        Look up the directory flags for a whole listing in one query.
+
+        A listing asks about every sub-directory it found, so this is deliberately
+        plural — the per-path form below exists for callers that genuinely hold one path.
+
+        :param category: The category the directories belong to.
+        :type category: str
+        :param paths: The directory paths, in DB format.
+        :type paths: Iterable[str]
+        :return: Flags per path; paths with no record map to the default (all false).
+        :rtype: dict[str, DirFlags]
+        """
+        wanted = list(paths)
+        if not wanted:
+            return {}
+
+        docs = await DirMetadataModel.find(
+            {"category": category, "path": {"$in": wanted}}
+        ).to_list()
+        found = {
+            doc.path: DirFlags(
+                user_created=doc.user_created, user_deleted=doc.user_deleted
+            )
+            for doc in docs
+        }
+        return {path: found.get(path, DirFlags()) for path in wanted}
 
     async def is_user_created(self, category: str, path: str) -> bool:
         """
@@ -119,11 +215,20 @@ class DirMetadataService:
         :return: True if the directory was created through the application.
         :rtype: bool
         """
-        doc = await DirMetadataModel.find_one(
-            DirMetadataModel.category == category,
-            DirMetadataModel.path == path,
-        )
-        return bool(doc is not None and doc.user_created)
+        return (await self.get_flags(category, [path]))[path].user_created
+
+    async def is_user_deleted(self, category: str, path: str) -> bool:
+        """
+        Whether a user deliberately took this directory away.
+
+        :param category: The category of the directory.
+        :type category: str
+        :param path: The path of the directory, in DB format.
+        :type path: str
+        :return: True if the directory was deleted through the application.
+        :rtype: bool
+        """
+        return (await self.get_flags(category, [path]))[path].user_deleted
 
     async def bulk_set_metadata(self, category: str, entries: dict[str, tuple[float, float]]) -> None:
         """

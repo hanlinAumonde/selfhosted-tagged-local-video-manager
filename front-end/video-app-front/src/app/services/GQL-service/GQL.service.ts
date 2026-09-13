@@ -387,7 +387,8 @@ export class GqlService {
         variables: {
           input: {
             videoIds: input.videoIds,
-            relativePath: input.relativePath
+            relativePath: input.relativePath,
+            directoryDeletion: input.directoryDeletion ?? undefined
           }
         }
       }),

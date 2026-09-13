@@ -42,6 +42,14 @@ class LocalFSResourceHandler(BaseResourceHandler):
         """``os.makedirs`` already raises FileExistsError for an occupied path, file included."""
         os.makedirs(path)
 
+    def delete_directory(self, path: str) -> None:
+        """``os.rmdir`` already refuses anything but an empty directory."""
+        os.rmdir(path)
+
+    def is_directory_empty(self, path: str) -> bool:
+        with os.scandir(path) as entries:
+            return next(entries, None) is None
+
     def get_size(self, path: str) -> float:
         """get size of file directly via os.path to avoid unnecessary FileEntry creation"""
         return os.path.getsize(path)

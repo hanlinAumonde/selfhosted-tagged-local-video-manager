@@ -27,7 +27,7 @@ import { ValidationService } from '../../../services/validation-service/validati
 import { debounceTime, distinctUntilChanged, startWith, switchMap, takeWhile } from 'rxjs';
 import { ToastService } from '../../../services/toast-service/toast.service';
 import { ToastDisplayer } from "../../../shared/components/toast-displayer/toast-displayer";
-import { BatchPanelData, BatchPanelVideoItem, SeriesAction, TagAction } from '../../models/panels.model';
+import { BatchPanelData, BatchPanelVideoItem, SeriesAction, TagDirection } from '../../models/panels.model';
 import { VideoUpdateEventService } from '../../../services/video-update-event-service/video-update-event.service';
 import { ToastType } from '../../models/toast.model';
 import { SeriesReorderList } from '../series-reorder-list/series-reorder-list';
@@ -71,15 +71,16 @@ export class BatchOperationPanel {
   
   form = this.formBuilder.group({
     authorInput: ['', [this.validationService.authorValidator()]],
-    tagInput: ['', [this.validationService.tagValidator()]],
-    tagAction: ['append' as TagAction],
+    addTagInput: ['', [this.validationService.tagValidator()]],
+    removeTagInput: ['', [this.validationService.tagValidator()]],
     modifySeries: [false],
     seriesAction: ['set' as SeriesAction],
     seriesName: ['', [this.validationService.seriesNameValidator()]],
   });
 
   get authorInput() { return this.form.get('authorInput') as FormControl<string>; }
-  get tagInput() { return this.form.get('tagInput') as FormControl<string>; }
+  get addTagInput() { return this.form.get('addTagInput') as FormControl<string>; }
+  get removeTagInput() { return this.form.get('removeTagInput') as FormControl<string>; }
   get seriesNameInput() { return this.form.get('seriesName') as FormControl<string>; }
 
   newAuthor = toSignal(
@@ -128,7 +129,8 @@ export class BatchOperationPanel {
     return `Selected videos currently span ${existing.length} series (${existing.join(', ')}). Saving will move them all into "${target}".`;
   });
 
-  tags = signal<string[]>([]);
+  addTags = signal<string[]>([]);
+  removeTags = signal<string[]>([]);
   isSaving = signal<boolean>(false);
 
   // Ordered videos for series reordering. Initial order: by existing seriesOrder asc, then by name.
@@ -148,9 +150,17 @@ export class BatchOperationPanel {
     { initialValue: this.gqlService.initialSignalData<string[]>([]) }
   );
 
-  tagSuggestions = toSignal(
+  addTagSuggestions = toSignal(
     this.gqlService.getSuggestionsQuery(
-      this.tagInput.valueChanges.pipe(startWith(this.tagInput.value)),
+      this.addTagInput.valueChanges.pipe(startWith(this.addTagInput.value)),
+      SearchField.Tag
+    ),
+    { initialValue: this.gqlService.initialSignalData<string[]>([]) }
+  );
+
+  removeTagSuggestions = toSignal(
+    this.gqlService.getSuggestionsQuery(
+      this.removeTagInput.valueChanges.pipe(startWith(this.removeTagInput.value)),
       SearchField.Tag
     ),
     { initialValue: this.gqlService.initialSignalData<string[]>([]) }
@@ -167,8 +177,11 @@ export class BatchOperationPanel {
   );
 
   tagsError = computed(() => {
-    const result = this.validationService.validateTagsArray(this.tags());
-    return result.valid ? null : result.error;
+    for (const list of [this.addTags(), this.removeTags()]) {
+      const result = this.validationService.validateTagsArray(list);
+      if (!result.valid) return result.error;
+    }
+    return null;
   });
 
   hasSeriesOperation = computed(() => {
@@ -181,8 +194,22 @@ export class BatchOperationPanel {
 
   processingMessage = signal<string>('');
 
-  addTag(tagValue?: string) {
-    const value = tagValue ?? this.tagInput.value;
+  private tagList(direction: TagDirection) {
+    return direction === 'add' ? this.addTags : this.removeTags;
+  }
+
+  private clearTagInput(direction: TagDirection) {
+    if (direction === 'add') this.form.patchValue({ addTagInput: '' });
+    else this.form.patchValue({ removeTagInput: '' });
+  }
+
+  /** A tag already claimed by the other direction, which the backend would refuse. */
+  conflictingTag = signal<string | null>(null);
+
+  addTag(direction: TagDirection, tagValue?: string) {
+    const value = tagValue ?? (
+      direction === 'add' ? this.addTagInput.value : this.removeTagInput.value
+    );
 
     if (!value || value.trim() === '') {
       return;
@@ -195,39 +222,47 @@ export class BatchOperationPanel {
       return;
     }
 
-    const tagsArrayValidation = this.validationService.validateTagsArray([...this.tags(), trimmedTag]);
+    // The same tag in both lists says nothing about what should happen to it, so the
+    // backend rejects the request outright. Saying so here costs a round trip less.
+    const other = direction === 'add' ? this.removeTags() : this.addTags();
+    if (other.includes(trimmedTag)) {
+      this.conflictingTag.set(trimmedTag);
+      return;
+    }
+
+    const list = this.tagList(direction);
+    const tagsArrayValidation = this.validationService.validateTagsArray([...list(), trimmedTag]);
     if (!tagsArrayValidation.valid) {
       return;
     }
 
-    if (this.tags().includes(trimmedTag)) {
-      this.form.patchValue({ tagInput: '' });
-      return;
+    this.conflictingTag.set(null);
+    if (!list().includes(trimmedTag)) {
+      list.update(tags => [...tags, trimmedTag]);
     }
-
-    this.tags.update(tags => [...tags, trimmedTag]);
-    this.form.patchValue({ tagInput: '' });
+    this.clearTagInput(direction);
   }
 
   selectAuthorSuggestion(author: string) {
     this.form.patchValue({ authorInput: author });
   }
 
-  selectTagSuggestion(tag: string) {
-    this.addTag(tag);
+  selectTagSuggestion(direction: TagDirection, tag: string) {
+    this.addTag(direction, tag);
   }
 
   selectSeriesSuggestion(name: string) {
     this.form.patchValue({ seriesName: name });
   }
 
-  removeTag(tag: string) {
-    this.tags.update(tags => tags.filter(t => t !== tag));
+  removeTag(direction: TagDirection, tag: string) {
+    this.tagList(direction).update(tags => tags.filter(t => t !== tag));
+    if (this.conflictingTag() === tag) this.conflictingTag.set(null);
   }
 
-  onTagInputEnter(event: Event) {
+  onTagInputEnter(direction: TagDirection, event: Event) {
     event.preventDefault();
-    this.addTag();
+    this.addTag(direction);
   }
 
   private buildSeriesOperation(): SeriesOperationInput | undefined {
@@ -248,7 +283,7 @@ export class BatchOperationPanel {
 
   handleSave() {
     const seriesOperation = this.buildSeriesOperation();
-    const hasTags = this.tags().length > 0;
+    const hasTags = this.addTags().length > 0 || this.removeTags().length > 0;
     const hasAuthor = (this.newAuthor() ?? '').trim() !== '';
 
     if (this.isVideoMode && !hasTags && !hasAuthor && !seriesOperation) return;
@@ -256,8 +291,8 @@ export class BatchOperationPanel {
     this.isSaving.set(true);
 
     const tagsOperation = hasTags ? {
-      tags: this.tags(),
-      append: this.form.value.tagAction === 'append'
+      addTags: this.addTags(),
+      removeTags: this.removeTags()
     } : undefined;
 
     const author = hasAuthor
@@ -327,7 +362,8 @@ export class BatchOperationPanel {
     if (this.form.invalid || this.tagsError()) return true;
     if (!this.isVideoMode) return false;
     const hasAny =
-      this.tags().length > 0 ||
+      this.addTags().length > 0 ||
+      this.removeTags().length > 0 ||
       (this.newAuthor() ?? '').trim() !== '' ||
       this.hasSeriesOperation();
     return !hasAny;

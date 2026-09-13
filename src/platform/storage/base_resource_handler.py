@@ -85,6 +85,38 @@ class BaseResourceHandler(ABC):
         """
         ...
 
+    @abstractmethod
+    def delete_directory(self, path: str) -> None:
+        """
+        Remove the directory at the given path, which must hold nothing.
+
+        Deliberately narrow: it never recurses. The caller decides whether a directory
+        is empty enough to go — usually by asking ``is_directory_empty`` first — so a
+        wrong decision upstream costs one refusal rather than a deleted tree.
+
+        :param path: FS-format path of the directory to remove.
+        :type path: str
+        :rtype: None
+        :raises OSError: If the path is not an empty directory.
+        """
+        ...
+
+    @abstractmethod
+    def is_directory_empty(self, path: str) -> bool:
+        """
+        Whether the directory holds nothing at all — no files, no sub-directories.
+
+        A storage question rather than a service one: an empty local directory lists
+        nothing, while an empty S3 "directory" lists the one marker object standing in
+        for it.
+
+        :param path: FS-format path of the directory.
+        :type path: str
+        :return: True if nothing is left inside.
+        :rtype: bool
+        """
+        ...
+
     # --- File content read/write ---
 
     @abstractmethod

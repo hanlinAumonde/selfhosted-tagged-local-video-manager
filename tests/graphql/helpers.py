@@ -392,6 +392,13 @@ def make_migration_path_input(relative_path: str) -> dict:
     return {"relativePath": relative_path}
 
 
+def make_tags_operation(
+    add: list[str] | None = None, remove: list[str] | None = None
+) -> dict:
+    """One batch tag edit, carrying both directions at once."""
+    return {"addTags": list(add or []), "removeTags": list(remove or [])}
+
+
 def make_batch_input(
     video_ids: list[str] | None = None,
     relative_path: str | None = None,
@@ -399,6 +406,7 @@ def make_batch_input(
     tags_operation: dict | None = None,
     series_operation: dict | None = None,
     author: str | None = None,
+    directory_deletion: str | None = None,
 ) -> dict:
     return {
         "videoIds": list(video_ids or []),
@@ -406,4 +414,5 @@ def make_batch_input(
         "tagsOperation": tags_operation,
         "seriesOperation": series_operation,
         "author": author,
+        "directoryDeletion": directory_deletion,
     }

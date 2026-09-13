@@ -7,16 +7,18 @@ from fastapi.concurrency import run_in_threadpool
 from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
 from src.features.catalog.video import VideoModel
-from src.errors import DatabaseOperationError, FileBrowseError
+from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
 from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,
     TagsOperationMappingInputModel,
 )
 from src.features.browsing.dir_metadata_service import DirMetadataService
+from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.base_file_entry import BaseFileEntry
+from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.tag_operation_service import TagOperationService
 from src.features.playback.thumbnail_service import ThumbnailService
@@ -86,19 +88,36 @@ class BatchOperationService:
     async def batch_delete(self,
                            dir_path: AbsolutePath,
                            videoIds: list[str],
-                           fileEntries: list[BaseFileEntry] | None) -> AsyncGenerator[BatchProgress, None]:
+                           fileEntries: list[BaseFileEntry] | None,
+                           directoryDeletion: DirectoryDeletionStrategy | None = None
+                           ) -> AsyncGenerator[BatchProgress, None]:
         """
         Resolve function to batch delete videos based on provided video IDs or directory path.
-        
+
         :param dir_path: The absolute path of the directory containing the videos to delete.
         :type dir_path: AbsolutePath
         :param videoIds: List of video IDs to delete.
         :type videoIds: list[str]
         :param fileEntries: List of file entries representing videos to delete (used if videoIds is not provided).
         :type fileEntries: list[BaseFileEntry] | None
+        :param directoryDeletion: What becomes of ``dir_path`` itself. Set only when the
+            request is a "Delete all" on that directory; ``None`` means the directory is
+            merely where the deleted videos happened to live.
+        :type directoryDeletion: DirectoryDeletionStrategy | None
         :return: An asynchronous generator yielding the status of the batch delete operation.
         :rtype: AsyncGenerator[BatchProgress, None]"""
-        if (not videoIds and not fileEntries) or dir_path.get_path() is None:
+        if directoryDeletion is not None and (
+            dir_path.is_root_level() or dir_path.is_category_level()
+        ):
+            raise InputValidationError(
+                field="relativePath",
+                issue="only a directory on the storage can be deleted",
+            )
+
+        # An empty selection is normally nothing to do — but a folder with no videos in
+        # it is exactly the one a user is most likely to be taking back.
+        if (not videoIds and not fileEntries and directoryDeletion is None) \
+                or dir_path.get_path() is None:
             yield self.constructBatchOperationStatus(
                 resultType=BatchResultType.Failure,
                 message="No video IDs or file entries provided for batch delete"
@@ -107,8 +126,11 @@ class BatchOperationService:
 
         category = dir_path.category
 
+        selected_count = len(videoIds) if videoIds else len(fileEntries or [])
+        deleted_count = 0
+
         try:
-            if videoIds is not None:
+            if videoIds:
                 videos = await VideoModel.find_many(
                     {"_id": {"$in": [ObjectId(str(vid)) for vid in videoIds]}}
                 ).to_list()
@@ -124,8 +146,9 @@ class BatchOperationService:
                 not_deleted_ids = {v.id for v in videos_not_deleted}
                 actually_deleted = [v for v in videos if v.id not in not_deleted_ids]
                 await self._remove_videos_and_update_tags(actually_deleted, category)
+                deleted_count = result.deleted_count
 
-            else:
+            elif fileEntries:
                 handler = self.resourceHandlerService.get_handler(category)
                 paths = [handler.convert_to_DB_format_path(
                     handler.get_path_standard_format(fe.path)
@@ -145,21 +168,135 @@ class BatchOperationService:
                 not_deleted_paths = {v.path for v in videos_not_deleted}
                 actually_deleted = [v for v in videos_before_delete if v.path not in not_deleted_paths]
                 await self._remove_videos_and_update_tags(actually_deleted, category)
+                deleted_count = result.deleted_count
 
-            await self.dirMetadataService.update_directory_metadata_forward(dir_path)
+            if directoryDeletion is None:
+                await self.dirMetadataService.update_directory_metadata_forward(dir_path)
+            else:
+                async for progress in self._settle_directory(dir_path, directoryDeletion):
+                    yield progress
 
-            yield self.constructBatchOperationStatus(
-                resultType=BatchResultType.Success if (result.deleted_count == len(videoIds) if videoIds else result.deleted_count == len(fileEntries)) else \
-                        BatchResultType.PartialSuccess if result.deleted_count > 0
-                        else BatchResultType.Failure,
-                message=f"Deleted {result.deleted_count} out of {(len(videoIds) if videoIds else len(fileEntries))} videos" if result.deleted_count > 0 else None
-            )
+            yield self._delete_outcome(selected_count, deleted_count, directoryDeletion)
 
         except FileBrowseError:
             raise
         except Exception as e:
             logger.exception(f"Error during batch delete: {e}")
             raise DatabaseOperationError("batch_delete", "general_failure")
+
+    def _delete_outcome(self,
+                        selected_count: int,
+                        deleted_count: int,
+                        directoryDeletion: DirectoryDeletionStrategy | None) -> BatchProgress:
+        """
+        Settle a batch delete.
+
+        A total failure reports a message like any other outcome: a settled report with
+        no message is published as running commentary, so a delete that removed nothing
+        would leave the client waiting for an end that never comes.
+
+        :param selected_count: How many videos the request named.
+        :type selected_count: int
+        :param deleted_count: How many of them are gone.
+        :type deleted_count: int
+        :param directoryDeletion: What was asked of the directory itself, if anything.
+        :type directoryDeletion: DirectoryDeletionStrategy | None
+        :return: The settled report.
+        :rtype: BatchProgress
+        """
+        if selected_count == 0:
+            # Only reachable for a "Delete all" on a folder that held no videos.
+            return self.constructBatchOperationStatus(
+                resultType=BatchResultType.Success,
+                message="Deleted the folder"
+                if directoryDeletion is DirectoryDeletionStrategy.DeleteFolder
+                else "The folder held no videos",
+            )
+
+        if deleted_count == selected_count:
+            result_type = BatchResultType.Success
+        elif deleted_count > 0:
+            result_type = BatchResultType.PartialSuccess
+        else:
+            result_type = BatchResultType.Failure
+
+        return self.constructBatchOperationStatus(
+            resultType=result_type,
+            message=f"Deleted {deleted_count} out of {selected_count} videos",
+        )
+
+    async def _settle_directory(self,
+                                dir_path: AbsolutePath,
+                                strategy: DirectoryDeletionStrategy
+                                ) -> AsyncGenerator[BatchProgress, None]:
+        """
+        Record what the user decided about the directory itself, once its videos are gone.
+
+        Neither answer recurses over the storage. A sub-directory is something else that
+        is inside this one, no different from a stray file: its own videos went with the
+        walk, but nothing unlinks it.
+
+        :param dir_path: The directory the "Delete all" was asked of.
+        :type dir_path: AbsolutePath
+        :param strategy: What the user chose for the folder.
+        :type strategy: DirectoryDeletionStrategy
+        :return: An asynchronous generator yielding progress for this step.
+        :rtype: AsyncGenerator[BatchProgress, None]
+        """
+        category = dir_path.category
+        handler = self.resourceHandlerService.get_handler(category)
+        db_path = dir_path.DB_format_path()
+
+        if strategy is DirectoryDeletionStrategy.KeepFolder:
+            # It holds nothing now, and a directory holding nothing is hidden unless
+            # something says a user wants it there. This is that something.
+            await self.dirMetadataService.mark_user_created(category, db_path)
+            await self.dirMetadataService.update_directory_metadata_forward(dir_path)
+            yield self.constructBatchOperationStatus(status="Kept the folder")
+            return
+
+        removed = await run_in_threadpool(
+            self._delete_directory_if_empty, handler, dir_path.FS_format_path()
+        )
+        if removed:
+            await self.dirMetadataService.forget(category, db_path)
+            yield self.constructBatchOperationStatus(status="Removed the folder")
+        else:
+            await self.dirMetadataService.mark_user_deleted(category, db_path)
+            yield self.constructBatchOperationStatus(
+                status="Removed the folder from the browser; it still holds other files"
+            )
+
+        parent_db_path = handler.dirname(db_path)
+        if parent_db_path and parent_db_path != db_path:
+            await self.dirMetadataService.update_directory_metadata_forward(
+                AbsolutePath.from_existing_path(
+                    path=parent_db_path, category=category, handler=handler
+                )
+            )
+
+    def _delete_directory_if_empty(self, handler: BaseResourceHandler, fs_path: str) -> bool:
+        """
+        Take the directory off the storage, but only if nothing at all is left in it.
+
+        A failure here is not a failed delete: the videos are already gone, and the
+        directory can still be taken out of the browser by marking it.
+
+        :param handler: The resource handler for the directory's category.
+        :type handler: BaseResourceHandler
+        :param fs_path: The directory's FS-format path.
+        :type fs_path: str
+        :return: True if the directory is no longer on the storage.
+        :rtype: bool
+        """
+        try:
+            if not handler.is_directory_empty(fs_path):
+                return False
+            handler.delete_directory(fs_path)
+            return True
+        except (OSError, Exception) as e:
+            logger.exception(f"Could not remove directory {fs_path}: {e}")
+            return False
 
     async def batch_update(self,
                            category: str,
@@ -351,13 +488,13 @@ class BatchOperationService:
                 update_query["author"] = author
 
             if tagsOperation is not None:
-                tags_set = set(tagsOperation.tags)
-                if tagsOperation.append:
-                    new_tags = old_tags.union(tags_set)
-                    self.tagOperationService.track_tag_change(update_tags, new_tags - old_tags, True)
-                else:
-                    new_tags = old_tags - tags_set
-                    self.tagOperationService.track_tag_change(update_tags, old_tags.intersection(tags_set), False)
+                # Both directions settle in one pass. The counts move by what actually
+                # changed on this video rather than by what was asked for: a tag it
+                # already carried is not a new reference, and one it never had is not a
+                # lost one.
+                new_tags = (old_tags | set(tagsOperation.addTags)) - set(tagsOperation.removeTags)
+                self.tagOperationService.track_tag_change(update_tags, new_tags - old_tags, True)
+                self.tagOperationService.track_tag_change(update_tags, old_tags - new_tags, False)
                 if new_tags != old_tags:
                     update_query["tags"] = list(new_tags)
 
@@ -483,10 +620,11 @@ class BatchOperationService:
         if author is not None:
             set_on_insert["author"] = author
 
-        if tagsOperation is not None:
-            tags_set = set(tagsOperation.tags)
-            if tagsOperation.append:
-                set_on_insert["tags"] = list(tags_set)
-                self.tagOperationService.track_tag_change(update_tags, tags_set, True)
+        # Only the added tags apply: a document that does not exist yet carries nothing
+        # for the removals to take away.
+        if tagsOperation is not None and tagsOperation.addTags:
+            tags_set = set(tagsOperation.addTags)
+            set_on_insert["tags"] = list(tags_set)
+            self.tagOperationService.track_tag_change(update_tags, tags_set, True)
 
         return UpdateOne(filter_query, {"$setOnInsert": set_on_insert}, upsert=True)
