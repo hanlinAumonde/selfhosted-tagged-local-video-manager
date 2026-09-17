@@ -8,7 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from src.config import get_settings
 from src.config import S3HandlerConfig
 from src.platform.storage.base_file_entry import BaseFileEntry
-from src.platform.storage.base_resource_handler import BaseResourceHandler
+from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
 from src.platform.storage.s3.s3_file_entry import S3FileEntry
 
 
@@ -18,6 +18,12 @@ class S3ResourceHandler(BaseResourceHandler):
     # S3 key prefixes for different content types
     VIDEO_PREFIX = "videos"
     THUMBNAIL_PREFIX = "thumbnails"
+
+    storage_type = "s3"
+
+    @classmethod
+    def from_config(cls, spec: HandlerBuildSpec) -> "S3ResourceHandler":
+        return cls(spec.category, spec.pseudo_paths, spec.config.mounts)
 
     def __init__(
         self,

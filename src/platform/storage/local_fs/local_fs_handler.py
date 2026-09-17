@@ -3,13 +3,21 @@ from typing import AsyncIterator, Generator, Iterator
 import os
 import aiofiles
 from src.config import get_settings
-from src.platform.storage.base_resource_handler import BaseResourceHandler
+from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
 from src.platform.storage.base_file_entry import BaseFileEntry
 from src.platform.storage.local_fs.local_fs_file_entry import LocalFSFileEntry
 
 
 class LocalFSResourceHandler(BaseResourceHandler):
     """Resource handler for local filesystem operations."""
+
+    storage_type = "local_fs"
+
+    @classmethod
+    def from_config(cls, spec: HandlerBuildSpec) -> "LocalFSResourceHandler":
+        """Mount locations come from ``resource_paths``; the only extra input is
+        the container mount base, which is process-wide rather than per category."""
+        return cls(spec.category, spec.pseudo_paths, spec.settings.ROOT_PATH)
 
     def __init__(self, category: str, pseudo_paths: dict[str, str], root_path: str | None):
         """

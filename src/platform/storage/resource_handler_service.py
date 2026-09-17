@@ -1,6 +1,13 @@
 from src.config import Settings
-from src.platform.storage.base_resource_handler import BaseResourceHandler
+from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
 from src.platform.storage.local_fs.local_fs_handler import LocalFSResourceHandler
+from src.platform.storage.s3.s3_handler import S3ResourceHandler
+
+_HANDLER_TYPES: dict[str, type[BaseResourceHandler]] = {
+    LocalFSResourceHandler.storage_type: LocalFSResourceHandler,
+    S3ResourceHandler.storage_type: S3ResourceHandler,
+}
+
 
 class ResourceHandlerService:
     """Dispatcher that selects the correct resource handler based on category."""
@@ -19,7 +26,10 @@ class ResourceHandlerService:
                         pseudo_paths: dict[str, str],
                         settings: Settings) -> BaseResourceHandler:
         """
-        Factory method to create a resource handler instance based on category and config.
+        Build the resource handler a category declares in its configuration.
+
+        Reads the declared type, looks up the class serving it, and hands that class
+        the same envelope every handler is built from.
 
         :param category: The category of the resource handler to create.
         :type category: str
@@ -29,14 +39,23 @@ class ResourceHandlerService:
         :type settings: Settings
         :return: An instance of a resource handler for the specified category.
         :rtype: BaseResourceHandler
+        :raises ValueError: If the declared type has no registered handler.
         """
-        handler_configs = settings.handler_config.get(category, {})
-
-        if handler_configs:
-            from src.platform.storage.s3.s3_handler import S3ResourceHandler
-            return S3ResourceHandler(category, pseudo_paths, handler_configs)
-        else:
-            return LocalFSResourceHandler(category, pseudo_paths, settings.ROOT_PATH)
+        config = settings.get_handler_config(category)
+        handler_cls = _HANDLER_TYPES.get(config.type)
+        if handler_cls is None:
+            known = ", ".join(sorted(_HANDLER_TYPES))
+            raise ValueError(
+                f"No handler for storage type '{config.type}'. Known types: {known}"
+            )
+        return handler_cls.from_config(
+            HandlerBuildSpec(
+                category=category,
+                pseudo_paths=pseudo_paths,
+                config=config,
+                settings=settings,
+            )
+        )
 
     def get_handler(self, category: str) -> BaseResourceHandler:
         """
