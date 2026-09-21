@@ -89,7 +89,7 @@
         </div>
 
         <!-- Space Check -->
-        @if (preflightResult()?.spaceSufficient !== null && preflightResult()?.spaceSufficient !== undefined) {
+        @if (preflightResult()?.spaceSufficient != null) {
           <div class="flex items-center gap-2 text-sm">
             @if (preflightResult()!.spaceSufficient) {
               <mat-icon fontIcon="check_circle" class="text-green-500 text-base!"></mat-icon>

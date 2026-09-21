@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
@@ -53,6 +53,7 @@ import { SeriesReorderList } from '../series-reorder-list/series-reorder-list';
     ToastDisplayer,
     SeriesReorderList,
 ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './batch-operation-panel.html'
 })
 export class BatchOperationPanel {

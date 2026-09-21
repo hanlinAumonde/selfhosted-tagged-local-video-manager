@@ -6,6 +6,7 @@ import {
   input,
   output,
   viewChild,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
@@ -15,6 +16,7 @@ import Player from 'video.js/dist/types/player';
   standalone: true,
   templateUrl: './video-player-host.html',
   // Stay transparent to layout: the player sized against the caller's block before
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: `:host { display: block; width: 100%; }`,
 })
 export class VideoPlayerHost implements OnDestroy {

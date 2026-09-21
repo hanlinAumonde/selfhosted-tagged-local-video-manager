@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
@@ -36,6 +36,7 @@ import { DirectorySearchCriteria, SearchPanelData } from '../../models/panels.mo
     MatIconModule,
     MatInputModule
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './search-panel.html'
 })
 export class SearchPanel {

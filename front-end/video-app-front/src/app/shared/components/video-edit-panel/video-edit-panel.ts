@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, signal, computed, inject, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
@@ -51,6 +51,7 @@ import { SeriesReorderList } from '../series-reorder-list/series-reorder-list';
     ToastDisplayer,
     SeriesReorderList,
 ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './video-edit-panel.html'
 })
 export class VideoEditPanel implements OnInit {

@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
@@ -10,6 +10,7 @@ import { HttpClientService } from '../../../services/Http-client-service/Http-cl
 @Component({
   selector: 'app-video-card',
   imports: [RouterLink, MatCardModule, MatChipsModule, MatIconModule, MatTooltipModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './video-card.html',
 })
 export class VideoCard {

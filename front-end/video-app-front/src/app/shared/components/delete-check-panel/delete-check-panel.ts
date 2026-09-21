@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnDestroy, signal } from '@angular/core';
+import { Component, computed, inject, OnDestroy, signal, ChangeDetectionStrategy } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { 
   MAT_DIALOG_DATA, 
@@ -31,6 +31,7 @@ import { ToastType } from '../../models/toast.model';
     MatRadioModule,
     ToastDisplayer
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './delete-check-panel.html',
 })
 export class DeleteCheckPanel implements OnDestroy {

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { VideoCard } from '../../shared/components/video-card/video-card';
 import { MatButtonModule } from '@angular/material/button';
 import { GqlService } from '../../services/GQL-service/GQL.service';
@@ -18,6 +18,7 @@ import { filter, Subject, switchMap } from 'rxjs';
 @Component({
   selector: 'app-homepage',
   imports: [VideoCard, MatButtonModule, RouterModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './homepage.html',
 })
 export class Homepage {

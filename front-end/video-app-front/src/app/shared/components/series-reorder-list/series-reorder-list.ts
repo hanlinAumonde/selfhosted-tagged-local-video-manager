@@ -1,4 +1,4 @@
-import { Component, computed, input, output } from '@angular/core';
+import { Component, computed, input, output, ChangeDetectionStrategy } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -7,6 +7,7 @@ import { BatchPanelVideoItem } from '../../models/panels.model';
 @Component({
   selector: 'app-series-reorder-list',
   imports: [MatButtonModule, MatIconModule, MatTooltipModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './series-reorder-list.html',
 })
 export class SeriesReorderList {

@@ -1,4 +1,4 @@
-import { Component, inject, computed, effect, signal, DestroyRef } from '@angular/core';
+import { Component, inject, computed, effect, signal, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { debounceTime, Subject, switchMap } from 'rxjs';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -43,6 +43,7 @@ import { VideoUpdateType } from '../../shared/models/events.model';
     VideoCard,
     Pagination
 ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './search.html'
 })
 export class Search {

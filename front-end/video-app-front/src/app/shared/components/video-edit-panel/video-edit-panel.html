@@ -100,7 +100,7 @@
               Series fields stay untouched.
               @if (video()?.seriesName) {
                 Currently in: <strong>{{ video()?.seriesName }}</strong>
-                @if (video()?.seriesOrder !== null && video()?.seriesOrder !== undefined) {
+                @if (video()?.seriesOrder != null) {
                   (order {{ video()?.seriesOrder }})
                 }
               } @else {

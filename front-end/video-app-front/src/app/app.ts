@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { Sidebar } from './shared/components/sidebar/sidebar';
 import { Header } from './shared/components/header/header';
@@ -11,6 +11,7 @@ import { MatIconModule } from '@angular/material/icon';
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Sidebar, Header, ToastDisplayer, MatIconModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './app.html'
 })
 export class App {

@@ -5,6 +5,7 @@ import {
   computed,
   effect,
   DestroyRef,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -47,6 +48,7 @@ import { ToastType } from '../../shared/models/toast.model';
     SeriesPanel,
     VideoPlayerHost,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './video-player.html'
 })
 export class VideoPlayer {

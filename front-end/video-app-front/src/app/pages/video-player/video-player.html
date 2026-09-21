@@ -57,7 +57,7 @@
               <span class="text-blue-600 font-semibold">Series:</span>
               <span class="px-3 py-1 bg-blue-100 dark:bg-blue-500/20 dark:text-blue-300 rounded-full">
                 {{ video().data?.seriesName }}
-                @if (video().data?.seriesOrder !== null && video().data?.seriesOrder !== undefined) {
+                @if (video().data?.seriesOrder != null) {
                   <span class="ml-1 text-xs opacity-70">#{{ video().data?.seriesOrder }}</span>
                 }
               </span>

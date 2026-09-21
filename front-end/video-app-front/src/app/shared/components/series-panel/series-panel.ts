@@ -7,6 +7,7 @@ import {
   input,
   signal,
   viewChildren,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
@@ -22,6 +23,7 @@ import { environment } from '../../../../environments/environment';
 @Component({
   selector: 'app-series-panel',
   imports: [RouterLink, MatIconModule, MatProgressSpinnerModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './series-panel.html',
 })
 export class SeriesPanel implements AfterViewInit {

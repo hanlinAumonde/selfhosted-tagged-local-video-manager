@@ -1,4 +1,4 @@
-import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { Component, inject, signal, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -32,6 +32,7 @@ type Step = 'select' | 'preflight';
     MatTooltipModule,
     FormsModule,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './migration-panel.html'
 })
 export class MigrationPanel {

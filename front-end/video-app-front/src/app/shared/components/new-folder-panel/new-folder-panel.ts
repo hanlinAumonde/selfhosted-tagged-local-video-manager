@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -34,6 +34,7 @@ import { ToastDisplayer } from '../toast-displayer/toast-displayer';
     MatProgressBarModule,
     ToastDisplayer
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './new-folder-panel.html',
 })
 export class NewFolderPanel {
