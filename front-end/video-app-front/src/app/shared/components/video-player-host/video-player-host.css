@@ -1,0 +1,13 @@
+/*
+  video.js styles its markup with global class names, so this component opts out of view
+  encapsulation. Keeping the imports here rather than in styles.css is what makes them load
+  with the deferred player chunk instead of on every page.
+*/
+@import 'video.js/dist/video-js.min.css';
+@import '@videojs/themes/dist/forest/index.css';
+
+/* Stay transparent to layout: the player sizes against the caller's block. */
+app-video-player-host {
+  display: block;
+  width: 100%;
+}

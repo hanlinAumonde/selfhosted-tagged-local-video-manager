@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import 'video.js/dist/video-js.min.css';
-@import '@videojs/themes/dist/forest/index.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 

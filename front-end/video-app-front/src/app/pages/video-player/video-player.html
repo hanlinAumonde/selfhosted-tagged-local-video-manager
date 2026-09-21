@@ -14,9 +14,15 @@
       <div [class]="video().data?.seriesName ? 'flex-1 min-w-0 w-full' : 'w-full max-w-4xl mx-auto'">
         <!-- Video Player Section -->
         <div class="w-full mb-6">
-          <app-video-player-host
-            [src]="videoStreamUrl()"
-            (played)="recordView()" />
+          @defer(on viewport){
+            <app-video-player-host
+              [src]="videoStreamUrl()"
+              (played)="recordView()" />
+          }@placeholder {
+            <div class="flex justify-center items-center h-96">
+              <mat-progress-spinner mode="indeterminate" diameter="48"></mat-progress-spinner>
+            </div>
+          }
         </div>
 
         <!-- Video Info Section -->

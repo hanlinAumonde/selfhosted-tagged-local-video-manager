@@ -1,11 +1,5 @@
 import { Routes } from '@angular/router';
-import { Homepage } from './pages/homepage/homepage';
-import { Search } from './pages/search/search'
-import { VideoPlayer } from './pages/video-player/video-player'
-import { FileBrowser } from './pages/file-browser/file-browser';
-import { Management } from './pages/management/management'
 import { VideoMetaDataResolver } from './route-resolver/video-player.resolver';
-
 
 export const routes: Routes = [
   {
@@ -16,18 +10,18 @@ export const routes: Routes = [
   {
     path: 'home',
     title: 'Home Page - Tagged Local Video App',
-    component: Homepage,
+    loadComponent: () => import('./pages/homepage/homepage').then(m => m.Homepage),
     data: { headerTitle: 'HomePage' }
   },
   {
     path: 'search',
     title: 'Search videos - Tagged Local Video App',
-    component: Search,
+    loadComponent: () => import('./pages/search/search').then(m => m.Search),
     data: { headerTitle: 'Search' }
   },
   {
     path: 'video/:id',
-    component: VideoPlayer,
+    loadComponent: () => import('./pages/video-player/video-player').then(m => m.VideoPlayer),
     title: 'Video Player - Tagged Local Video App',
     runGuardsAndResolvers: 'paramsChange',
     resolve: {
@@ -36,13 +30,13 @@ export const routes: Routes = [
   },
   {
     path: 'file-browser',
-    component: FileBrowser,
+    loadComponent: () => import('./pages/file-browser/file-browser').then(m => m.FileBrowser),
     title: 'File Browser - Tagged Local Video App',
     data: { headerTitle: 'File Browser' }
   },
   {
     path: 'management',
-    component: Management,
+    loadComponent: () => import('./pages/management/management').then(m => m.Management),
     title: 'Management - Tagged Local Video App',
     data: { headerTitle: 'Management' }
   },

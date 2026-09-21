@@ -18,6 +18,7 @@ const config: CodegenConfig = {
         withComponent: false,
         withHOC: false,
         addExplicitOverride: true,
+        documentMode: 'documentNode',
         scalars: {
           BigInt: 'string',
         },
