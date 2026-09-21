@@ -14,8 +14,10 @@ from src.schema.types.pydantic_types.batch_operation_type import (
 )
 from src.schema.types.video_type import SeriesOrderEntryInput, Video
 from src.features.browsing.batch_operation_service import BatchProgress, BatchResultType
-    
+from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
+
 BatchResultTypeEnum = Annotated[BatchResultType, strawberry.enum]
+DirectoryDeletionStrategyEnum = Annotated[DirectoryDeletionStrategy, strawberry.enum]
 
 @strawberry.type
 class FileBrowseNode:
@@ -45,8 +47,8 @@ class CreateDirectoryInput:
 
 @strawberry.experimental.pydantic.input(model=TagsOperationMappingInputModel)
 class TagsOperationMappingInput:
-    append: strawberry.auto
-    tags: strawberry.auto
+    addTags: strawberry.auto
+    removeTags: strawberry.auto
 
 
 @strawberry.experimental.pydantic.input(model=SeriesOperationInputModel)
@@ -63,6 +65,7 @@ class VideosBatchOperationInput:
     tagsOperation: Optional[TagsOperationMappingInput] = None
     author: strawberry.auto
     seriesOperation: Optional[SeriesOperationInput] = None
+    directoryDeletion: Optional[DirectoryDeletionStrategyEnum] = None
 
 @strawberry.type
 class VideosBatchOperationResult:

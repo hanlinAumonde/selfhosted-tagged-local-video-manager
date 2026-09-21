@@ -36,17 +36,60 @@ class TestSeriesOperationInputModel:
 
 
 class TestTagsOperationMappingInputModel:
-    def test_too_many_tags(self, test_settings):
+    """
+    The input carries both directions of a batch tag edit at once, so the limits that
+    used to apply to one list now have two to police, and a new question appears that
+    a one-directional input could not ask: what does naming the same tag in both mean?
+
+    Nothing — so it is refused. Picking a winner would let a caller believe a tag was
+    added when it was taken away, or the reverse, with no way to tell from the result.
+    """
+
+    def test_too_many_tags_to_add(self, test_settings):
         max_count = test_settings.validation.max_tags_count
         with pytest.raises(ValueError, match="Too many tags"):
             TagsOperationMappingInputModel(
-                append=True, tags=[f"t{i}" for i in range(max_count + 1)]
+                addTags=[f"t{i}" for i in range(max_count + 1)], removeTags=[]
             )
 
-    def test_tag_too_long(self, test_settings):
+    def test_too_many_tags_to_remove(self, test_settings):
+        max_count = test_settings.validation.max_tags_count
+        with pytest.raises(ValueError, match="Too many tags"):
+            TagsOperationMappingInputModel(
+                addTags=[], removeTags=[f"t{i}" for i in range(max_count + 1)]
+            )
+
+    def test_a_tag_to_add_that_is_too_long(self, test_settings):
         max_len = test_settings.validation.tag_max_length
         with pytest.raises(ValueError, match="too long"):
-            TagsOperationMappingInputModel(append=True, tags=["x" * (max_len + 1)])
+            TagsOperationMappingInputModel(
+                addTags=["x" * (max_len + 1)], removeTags=[]
+            )
+
+    def test_a_tag_to_remove_that_is_too_long(self, test_settings):
+        max_len = test_settings.validation.tag_max_length
+        with pytest.raises(ValueError, match="too long"):
+            TagsOperationMappingInputModel(
+                addTags=[], removeTags=["x" * (max_len + 1)]
+            )
+
+    def test_the_same_tag_in_both_lists_is_refused(self):
+        with pytest.raises(ValueError, match="both added and removed"):
+            TagsOperationMappingInputModel(
+                addTags=["4k", "raw"], removeTags=["todo", "raw"]
+            )
+
+    def test_both_lists_may_be_empty(self):
+        model = TagsOperationMappingInputModel(addTags=[], removeTags=[])
+        assert model.addTags == []
+        assert model.removeTags == []
+
+    def test_disjoint_lists_are_accepted(self):
+        model = TagsOperationMappingInputModel(
+            addTags=["4k"], removeTags=["todo"]
+        )
+        assert model.addTags == ["4k"]
+        assert model.removeTags == ["todo"]
 
 
 class TestBatchOperationInputModel:

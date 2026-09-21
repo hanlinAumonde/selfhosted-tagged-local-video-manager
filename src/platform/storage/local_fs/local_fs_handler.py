@@ -3,13 +3,21 @@ from typing import AsyncIterator, Generator, Iterator
 import os
 import aiofiles
 from src.config import get_settings
-from src.platform.storage.base_resource_handler import BaseResourceHandler
+from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
 from src.platform.storage.base_file_entry import BaseFileEntry
 from src.platform.storage.local_fs.local_fs_file_entry import LocalFSFileEntry
 
 
 class LocalFSResourceHandler(BaseResourceHandler):
     """Resource handler for local filesystem operations."""
+
+    storage_type = "local_fs"
+
+    @classmethod
+    def from_config(cls, spec: HandlerBuildSpec) -> "LocalFSResourceHandler":
+        """Mount locations come from ``resource_paths``; the only extra input is
+        the container mount base, which is process-wide rather than per category."""
+        return cls(spec.category, spec.pseudo_paths, spec.settings.ROOT_PATH)
 
     def __init__(self, category: str, pseudo_paths: dict[str, str], root_path: str | None):
         """
@@ -41,6 +49,14 @@ class LocalFSResourceHandler(BaseResourceHandler):
     def create_directory(self, path: str) -> None:
         """``os.makedirs`` already raises FileExistsError for an occupied path, file included."""
         os.makedirs(path)
+
+    def delete_directory(self, path: str) -> None:
+        """``os.rmdir`` already refuses anything but an empty directory."""
+        os.rmdir(path)
+
+    def is_directory_empty(self, path: str) -> bool:
+        with os.scandir(path) as entries:
+            return next(entries, None) is None
 
     def get_size(self, path: str) -> float:
         """get size of file directly via os.path to avoid unnecessary FileEntry creation"""

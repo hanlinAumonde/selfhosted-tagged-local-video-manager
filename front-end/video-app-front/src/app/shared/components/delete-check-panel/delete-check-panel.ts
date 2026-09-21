@@ -12,9 +12,10 @@ import { DeleteCheckPanelData, DeleteType } from '../../models/panels.model';
 import { GqlService } from '../../../services/GQL-service/GQL.service';
 import { Observable, tap } from 'rxjs';
 import { ToastService } from '../../../services/toast-service/toast.service';
-import { BatchResultType } from '../../../core/graphql/generated/graphql';
+import { BatchResultType, DirectoryDeletionStrategy } from '../../../core/graphql/generated/graphql';
 import { ToastDisplayer } from "../toast-displayer/toast-displayer";
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatRadioModule } from '@angular/material/radio';
 import { VideoUpdateEventService } from '../../../services/video-update-event-service/video-update-event.service';
 import { ToastType } from '../../models/toast.model';
 
@@ -27,6 +28,7 @@ import { ToastType } from '../../models/toast.model';
     MatDialogTitle, 
     MatDialogContent, 
     MatProgressBarModule,
+    MatRadioModule,
     ToastDisplayer
   ],
   templateUrl: './delete-check-panel.html',
@@ -48,6 +50,12 @@ export class DeleteCheckPanel implements OnDestroy {
     }
   }
 
+  readonly isDirectoryDelete = this.data.deleteType === DeleteType.Directory;
+  readonly KeepFolder = DirectoryDeletionStrategy.KeepFolder;
+  readonly DeleteFolder = DirectoryDeletionStrategy.DeleteFolder;
+
+  folderDisposition = signal<DirectoryDeletionStrategy>(DirectoryDeletionStrategy.KeepFolder);
+
   textToDelete = computed(() => {
     switch(this.data.deleteType){
       case DeleteType.Single:
@@ -55,7 +63,7 @@ export class DeleteCheckPanel implements OnDestroy {
       case DeleteType.Batch:
         return `the selected ${this.data.videoCount} videos`;
       case DeleteType.Directory:
-        return `all videos in the directory "${this.data.directoryPath}"`;
+        return `everything in the directory "${this.data.directoryPath}"`;
       default:
         return "the selected items";
     }
@@ -88,9 +96,10 @@ export class DeleteCheckPanel implements OnDestroy {
       case DeleteType.Directory:
         this.gqlRequest$ = this.processBatchDeletion(
           this.gqlService.batchDeleteVideosSubscription(
-          { 
+          {
             videoIds: [],
-            relativePath: { relativePath: this.data.directoryPath ? this.data.directoryPath : "" } 
+            relativePath: { relativePath: this.data.directoryPath ? this.data.directoryPath : "" },
+            directoryDeletion: this.folderDisposition()
           })
         );
         break;

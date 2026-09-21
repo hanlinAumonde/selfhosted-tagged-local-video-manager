@@ -17,7 +17,7 @@ from src.platform.jobs.path_locks import PathLockRegistry
 pytestmark = pytest.mark.unit
 
 PATH_LOCKS_SOURCE = (
-    Path(__file__).resolve().parents[3] / "src" / "platform" / "jobs" / "path_locks.py"
+    Path(__file__).resolve().parents[4] / "src" / "platform" / "jobs" / "path_locks.py"
 )
 
 

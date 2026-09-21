@@ -474,7 +474,7 @@ class TestBatchOperations:
                 "skipCache": False,
                 "recursiveCalculation": True,
             },
-            "tagsOperation": {"append": True, "tags": ["batch-tag"]},
+            "tagsOperation": {"addTags": ["batch-tag"], "removeTags": []},
             "author": "BatchAuthor",
         }})
 
@@ -529,7 +529,7 @@ class TestBatchOperations:
                 "skipCache": False,
                 "recursiveCalculation": True,
             },
-            "tagsOperation": {"append": True, "tags": []},
+            "tagsOperation": {"addTags": [], "removeTags": []},
             "seriesOperation": {
                 "name": "BatchSeries",
                 "clear": False,

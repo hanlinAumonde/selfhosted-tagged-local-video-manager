@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings
 
@@ -52,11 +52,35 @@ class TaskConfig(BaseModel):
 
 
 class S3HandlerConfig(BaseModel):
+    """Credentials and bucket for a single mount (one pseudo name)."""
+
     endpoint_url: str
     access_key: str
     secret_key: str
     bucket: str
     region: str = ""
+
+
+class LocalFSCategoryConfig(BaseModel):
+    """A category served straight off the host filesystem. It carries no options:
+    where its mounts live is already in ``resource_paths``."""
+
+    type: Literal["local_fs"] = "local_fs"
+
+
+class S3CategoryConfig(BaseModel):
+    """A category served by S3-compatible storage, one mount per pseudo name."""
+
+    type: Literal["s3"]
+    mounts: dict[str, S3HandlerConfig] = Field(min_length=1)
+
+
+# A new storage backend adds its own category config model and one member here.
+# The tag is what the registry looks up, so an unimplemented type is refused
+# while settings load rather than at a user's first request.
+HandlerConfig = Annotated[
+    LocalFSCategoryConfig | S3CategoryConfig, Field(discriminator="type")
+]
 
 
 class ThumbnailConfig(BaseModel):
@@ -68,7 +92,7 @@ class Settings(BaseSettings):
     model_config = ConfigDict(extra="ignore")
 
     resource_paths: dict[str, dict[str, str]] = Field(default_factory=dict)
-    handler_config: dict[str, dict[str, S3HandlerConfig]] = Field(default_factory=dict)
+    handler_config: dict[str, HandlerConfig] = Field(default_factory=dict)
     thumbnail_config: ThumbnailConfig = ThumbnailConfig()
     ROOT_PATH: Optional[str] = None
     cache_config: CacheConfig = CacheConfig()
@@ -80,6 +104,15 @@ class Settings(BaseSettings):
     validation: ValidationConfig = ValidationConfig()
     logging: LoggingConfig = LoggingConfig()
     tasks: TaskConfig = TaskConfig()
+
+    def get_handler_config(self, category: str) -> HandlerConfig:
+        """The handler configuration for a category, defaulting to the local filesystem.
+
+        The default lives here rather than in the dispatcher: which backend serves
+        an unconfigured category is a statement about configuration, and the
+        dispatcher should only ever look up whatever type it is handed.
+        """
+        return self.handler_config.get(category) or LocalFSCategoryConfig()
 
     def get_valid_categories(self) -> list[str]:
         return list(self.resource_paths.keys())

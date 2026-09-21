@@ -1,12 +1,44 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import AsyncIterator, Generator, Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, AsyncIterator, ClassVar, Generator, Iterator
 
 from src.platform.storage.base_file_entry import BaseFileEntry
+
+if TYPE_CHECKING:
+    from src.config import HandlerConfig, Settings
+
+
+@dataclass(frozen=True)
+class HandlerBuildSpec:
+    """Everything a handler may need in order to build itself.
+
+    Handlers draw on different things -- the local one wants the process-wide
+    ``ROOT_PATH``, an object-storage one wants its own per-mount credentials --
+    so the factory hands each of them the same envelope instead of knowing a
+    constructor signature per type.
+    """
+
+    category: str
+    pseudo_paths: dict[str, str]
+    config: HandlerConfig
+    settings: Settings
 
 
 class BaseResourceHandler(ABC):
     """Abstract base class for resource IO operations and path conversion."""
+
+    #: The name this backend is declared as in ``handler_config``. It is also the
+    #: key the registry files this class under; the two must not drift apart.
+    storage_type: ClassVar[str]
+
+    @classmethod
+    @abstractmethod
+    def from_config(cls, spec: HandlerBuildSpec) -> BaseResourceHandler:
+        """Build a handler for one category from its configuration."""
+        ...
 
     # --- IO operations ---
 
@@ -82,6 +114,38 @@ class BaseResourceHandler(ABC):
         :type path: str
         :rtype: None
         :raises FileExistsError: If anything already occupies that path.
+        """
+        ...
+
+    @abstractmethod
+    def delete_directory(self, path: str) -> None:
+        """
+        Remove the directory at the given path, which must hold nothing.
+
+        Deliberately narrow: it never recurses. The caller decides whether a directory
+        is empty enough to go — usually by asking ``is_directory_empty`` first — so a
+        wrong decision upstream costs one refusal rather than a deleted tree.
+
+        :param path: FS-format path of the directory to remove.
+        :type path: str
+        :rtype: None
+        :raises OSError: If the path is not an empty directory.
+        """
+        ...
+
+    @abstractmethod
+    def is_directory_empty(self, path: str) -> bool:
+        """
+        Whether the directory holds nothing at all — no files, no sub-directories.
+
+        A storage question rather than a service one: an empty local directory lists
+        nothing, while an empty S3 "directory" lists the one marker object standing in
+        for it.
+
+        :param path: FS-format path of the directory.
+        :type path: str
+        :return: True if nothing is left inside.
+        :rtype: bool
         """
         ...
 

@@ -8,15 +8,17 @@ resource_paths:
   S3-resource:
     Resource-1: /
 
-# handler-specific config (only for categories that need it)
+# a category with no entry here is served by the local filesystem.
 handler_config:
   S3-resource:
-    Resource-1:
-      endpoint_url: $S3_RESOURCE_1_ENDPOINT_URL|http://localhost:9000
-      access_key: $S3_RESOURCE_1_ACCESS_KEY|rustfsadmin
-      secret_key: $S3_RESOURCE_1_SECRET_KEY|rustfsadmin
-      bucket: $S3_RESOURCE_1_BUCKET|video-app
-      region: $S3_RESOURCE_1_REGION|us-east-1
+    type: s3
+    mounts:
+      Resource-1:
+        endpoint_url: $S3_RESOURCE_1_ENDPOINT_URL|http://localhost:9000
+        access_key: $S3_RESOURCE_1_ACCESS_KEY|rustfsadmin
+        secret_key: $S3_RESOURCE_1_SECRET_KEY|rustfsadmin
+        bucket: $S3_RESOURCE_1_BUCKET|video-app
+        region: $S3_RESOURCE_1_REGION|us-east-1
 
 # Thumbnail persistent storage (optional, requires S3-compatible storage)
 # If not configured, thumbnails are generated on-the-fly with ffmpeg (no persistence).

@@ -60,7 +60,9 @@ export interface DeleteCheckPanelData {
 }
 
 export type SeriesAction = 'set' | 'clear';
-export type TagAction = 'append' | 'remove';
+
+/** Which of a batch tag edit's two lists a chip belongs to. */
+export type TagDirection = 'add' | 'remove';
 
 export interface NewFolderPanelData {
   /** The directory the folder goes into, in DB path format. */

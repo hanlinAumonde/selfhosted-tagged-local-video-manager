@@ -8,7 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from src.config import get_settings
 from src.config import S3HandlerConfig
 from src.platform.storage.base_file_entry import BaseFileEntry
-from src.platform.storage.base_resource_handler import BaseResourceHandler
+from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
 from src.platform.storage.s3.s3_file_entry import S3FileEntry
 
 
@@ -18,6 +18,12 @@ class S3ResourceHandler(BaseResourceHandler):
     # S3 key prefixes for different content types
     VIDEO_PREFIX = "videos"
     THUMBNAIL_PREFIX = "thumbnails"
+
+    storage_type = "s3"
+
+    @classmethod
+    def from_config(cls, spec: HandlerBuildSpec) -> "S3ResourceHandler":
+        return cls(spec.category, spec.pseudo_paths, spec.config.mounts)
 
     def __init__(
         self,
@@ -206,6 +212,36 @@ class S3ResourceHandler(BaseResourceHandler):
             raise FileExistsError(f"S3 key already in use: {marker_key}")
 
         bucket.Object(marker_key).put(Body=b"")
+
+    def delete_directory(self, path: str) -> None:
+        """
+        Remove the marker object that stands in for this directory.
+
+        There is nothing else to unlink: the prefix itself is not a thing, so once the
+        marker goes the "directory" stops existing.
+        """
+        marker_key = path.rstrip("/") + "/"
+        if not self.is_directory_empty(path):
+            raise OSError(f"S3 prefix is not empty: {marker_key}")
+        self._get_object(marker_key).delete()
+
+    def is_directory_empty(self, path: str) -> bool:
+        """
+        Whether the marker object is the only thing under the prefix.
+
+        Two keys are enough to answer it: the marker, plus the first thing that is not
+        the marker.
+        """
+        pseudo_name, _ = self._get_pseudo_name_from_key(path)
+        bucket = self._get_bucket(pseudo_name)
+        marker_key = path.rstrip("/") + "/"
+
+        listing = bucket.meta.client.list_objects_v2(
+            Bucket=bucket.name, Prefix=marker_key, MaxKeys=2
+        )
+        return all(
+            obj["Key"] == marker_key for obj in listing.get("Contents", [])
+        )
 
     # ------------------------------------------------------------------
     # File content read/write

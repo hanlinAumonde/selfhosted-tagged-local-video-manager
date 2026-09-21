@@ -126,7 +126,7 @@ async def test_batch_update_sets_author_and_tags(
             videoIDs=[str(v.id)],
             fileEntries=None,
             author="alice",
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=["new"]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=["new"], removeTags=[]),
         )
     )
 
@@ -150,7 +150,7 @@ async def test_batch_update_clears_series(
             videoIDs=[str(v.id)],
             fileEntries=None,
             author=None,
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=[]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=[], removeTags=[]),
             seriesOperation=SeriesOperationInputModel(clear=True),
         )
     )
@@ -172,7 +172,7 @@ async def test_batch_update_assigns_series_with_orders(
             videoIDs=[str(a.id), str(b.id)],
             fileEntries=None,
             author=None,
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=[]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=[], removeTags=[]),
             seriesOperation=SeriesOperationInputModel(
                 name="MySeries",
                 clear=False,
@@ -203,7 +203,7 @@ async def test_batch_update_already_up_to_date(
             videoIDs=[str(v.id)],
             fileEntries=None,
             author="bob",
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=["x"]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=["x"], removeTags=[]),
         )
     )
 
@@ -229,7 +229,7 @@ async def test_batch_update_creates_new_video_from_entry(
             videoIDs=None,
             fileEntries=[entry],
             author="alice",
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=["new"]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=["new"], removeTags=[]),
         )
     )
 
@@ -317,10 +317,10 @@ async def test_batch_update_empty_input_yields_failure(batch_svc, init_db, fs_se
 
 
 # -----------------------------------------------------------------------
-# ---------------------- batch_update remove tags -----------------------
+# ------------- batch_update: a tag nothing carries any more -------------
 # -----------------------------------------------------------------------
 
-async def test_batch_update_removes_tags_append_false(
+async def test_batch_update_drops_a_tag_record_once_nothing_carries_it(
     batch_svc, init_db, video_factory, tag_factory, fs_settings,
 ):
     await tag_factory(name="keep", tag_count=1)
@@ -333,7 +333,7 @@ async def test_batch_update_removes_tags_append_false(
             videoIDs=[str(v.id)],
             fileEntries=None,
             author=None,
-            tagsOperation=TagsOperationMappingInputModel(append=False, tags=["remove"]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=[], removeTags=["remove"]),
         )
     )
 
@@ -361,7 +361,7 @@ async def test_batch_update_fetches_duration_when_zero(
             videoIDs=[str(v.id)],
             fileEntries=None,
             author="alice",
-            tagsOperation=TagsOperationMappingInputModel(append=True, tags=[]),
+            tagsOperation=TagsOperationMappingInputModel(addTags=[], removeTags=[]),
         )
     )
 

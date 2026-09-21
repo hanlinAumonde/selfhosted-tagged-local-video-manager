@@ -107,3 +107,46 @@ def local_resource_handler_service(fs_settings: Settings) -> ResourceHandlerServ
 def local_cache_service(fs_settings: Settings) -> CacheService:
     """An in-memory CacheService for unit tests."""
     return CacheService(config=fs_settings.cache_config)
+
+
+# -----------------------------------------------------------------------
+# ------------------------ Two-category variants -------------------------
+# -----------------------------------------------------------------------
+# The single-category fixtures above answer "one real directory on disk".
+# These answer "two of them, in different categories" — what any test that moves
+# or compares across category boundaries needs. Nothing here is task-specific.
+
+@pytest.fixture
+def target_dir(tmp_path: Path) -> Path:
+    """A second real directory, separate from ``local_resource_dir``."""
+    d = tmp_path / "target"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def two_category_settings(
+    test_settings: Settings,
+    local_resource_dir: Path,
+    target_dir: Path,
+    monkeypatch,
+) -> Settings:
+    """Settings with two categories: source and target, pointing at real dirs."""
+    payload = test_settings.model_dump()
+    payload["resource_paths"] = {
+        "Test-category": {"Test-resource": str(local_resource_dir)},
+        "Target-category": {"Target-resource": str(target_dir)},
+    }
+    settings = Settings.model_validate(payload)
+    monkeypatch.setattr(config, "_settings", settings)
+    return settings
+
+
+@pytest.fixture
+def two_cat_handler_service(two_category_settings: Settings) -> ResourceHandlerService:
+    return ResourceHandlerService(settings=two_category_settings)
+
+
+@pytest.fixture
+def two_cat_cache_service(two_category_settings: Settings) -> CacheService:
+    return CacheService(config=two_category_settings.cache_config)
