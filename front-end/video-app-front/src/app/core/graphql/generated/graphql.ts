@@ -1,4 +1,4 @@
-import { gql } from 'apollo-angular';
+import { DocumentNode } from 'graphql';
 import { Injectable } from '@angular/core';
 import * as Apollo from 'apollo-angular';
 export type Maybe<T> = T | null;
@@ -579,20 +579,7 @@ export type BatchDeleteSubscriptionSubscriptionVariables = Exact<{
 
 export type BatchDeleteSubscriptionSubscription = { __typename?: 'Subscription', batchDeleteSubscription: { __typename?: 'BatchOperationStatus', status?: string | null, result?: { __typename?: 'VideosBatchOperationResult', resultType: BatchResultType, message?: string | null } | null } };
 
-export const MigrationPreflightDocument = gql`
-    mutation MigrationPreflight($input: MigrationPreflightInput!) {
-  migrationPreflight(input: $input) {
-    valid
-    sourceFileSize
-    conflictExists
-    spaceAvailable
-    spaceSufficient
-    alreadyMigrating
-    sameLocation
-    errorMessage
-  }
-}
-    `;
+export const MigrationPreflightDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"MigrationPreflight"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationPreflightInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"migrationPreflight"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"valid"}},{"kind":"Field","name":{"kind":"Name","value":"sourceFileSize"}},{"kind":"Field","name":{"kind":"Name","value":"conflictExists"}},{"kind":"Field","name":{"kind":"Name","value":"spaceAvailable"}},{"kind":"Field","name":{"kind":"Name","value":"spaceSufficient"}},{"kind":"Field","name":{"kind":"Name","value":"alreadyMigrating"}},{"kind":"Field","name":{"kind":"Name","value":"sameLocation"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -604,32 +591,7 @@ export const MigrationPreflightDocument = gql`
       super(apollo);
     }
   }
-export const CreateMigrationTaskDocument = gql`
-    mutation CreateMigrationTask($input: CreateMigrationTaskInput!) {
-  createMigrationTask(input: $input) {
-    success
-    errorMessage
-    task {
-      id
-      sourcePath
-      sourceCategory
-      targetPath
-      targetCategory
-      fileName
-      fileSize
-      bytesTransferred
-      status
-      errorMessage
-      failedStep
-      conflictStrategy
-      renamedTargetPath
-      createdAt
-      updatedAt
-      completedAt
-    }
-  }
-}
-    `;
+export const CreateMigrationTaskDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateMigrationTask"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateMigrationTaskInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createMigrationTask"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"task"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -641,21 +603,7 @@ export const CreateMigrationTaskDocument = gql`
       super(apollo);
     }
   }
-export const CancelMigrationTaskDocument = gql`
-    mutation CancelMigrationTask($input: MigrationTaskActionInput!) {
-  cancelMigrationTask(input: $input) {
-    success
-    errorMessage
-    task {
-      id
-      sourcePath
-      targetPath
-      fileName
-      status
-    }
-  }
-}
-    `;
+export const CancelMigrationTaskDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CancelMigrationTask"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"cancelMigrationTask"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"task"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"status"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -667,33 +615,7 @@ export const CancelMigrationTaskDocument = gql`
       super(apollo);
     }
   }
-export const GetMigrationTasksDocument = gql`
-    query GetMigrationTasks($input: MigrationTaskQueryInput!) {
-  getMigrationTasks(input: $input) {
-    totalCount
-    page
-    pageSize
-    tasks {
-      id
-      sourcePath
-      sourceCategory
-      targetPath
-      targetCategory
-      fileName
-      fileSize
-      bytesTransferred
-      status
-      errorMessage
-      failedStep
-      conflictStrategy
-      renamedTargetPath
-      createdAt
-      updatedAt
-      completedAt
-    }
-  }
-}
-    `;
+export const GetMigrationTasksDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetMigrationTasks"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskQueryInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getMigrationTasks"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}},{"kind":"Field","name":{"kind":"Name","value":"page"}},{"kind":"Field","name":{"kind":"Name","value":"pageSize"}},{"kind":"Field","name":{"kind":"Name","value":"tasks"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -705,18 +627,7 @@ export const GetMigrationTasksDocument = gql`
       super(apollo);
     }
   }
-export const MigrationProgressDocument = gql`
-    subscription MigrationProgress($input: MigrationTaskActionInput!) {
-  migrationProgressSubscription(input: $input) {
-    taskId
-    status
-    bytesTransferred
-    totalBytes
-    progressPercentage
-    message
-  }
-}
-    `;
+export const MigrationProgressDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"subscription","name":{"kind":"Name","value":"MigrationProgress"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"migrationProgressSubscription"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"taskId"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"totalBytes"}},{"kind":"Field","name":{"kind":"Name","value":"progressPercentage"}},{"kind":"Field","name":{"kind":"Name","value":"message"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -728,18 +639,7 @@ export const MigrationProgressDocument = gql`
       super(apollo);
     }
   }
-export const MigrationRetryDocument = gql`
-    subscription MigrationRetry($input: MigrationTaskActionInput!) {
-  migrationRetrySubscription(input: $input) {
-    taskId
-    status
-    bytesTransferred
-    totalBytes
-    progressPercentage
-    message
-  }
-}
-    `;
+export const MigrationRetryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"subscription","name":{"kind":"Name","value":"MigrationRetry"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"migrationRetrySubscription"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"taskId"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"totalBytes"}},{"kind":"Field","name":{"kind":"Name","value":"progressPercentage"}},{"kind":"Field","name":{"kind":"Name","value":"message"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -751,25 +651,7 @@ export const MigrationRetryDocument = gql`
       super(apollo);
     }
   }
-export const UpdateVideoMetadataDocument = gql`
-    mutation UpdateVideoMetadata($input: UpdateVideoMetadataInput!) {
-  updateVideoMetadata(input: $input) {
-    success
-    video {
-      id
-      name
-      tags {
-        name
-      }
-      author
-      loved
-      introduction
-      seriesName
-      seriesOrder
-    }
-  }
-}
-    `;
+export const UpdateVideoMetadataDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"UpdateVideoMetadata"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"UpdateVideoMetadataInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"updateVideoMetadata"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"video"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}},{"kind":"Field","name":{"kind":"Name","value":"author"}},{"kind":"Field","name":{"kind":"Name","value":"loved"}},{"kind":"Field","name":{"kind":"Name","value":"introduction"}},{"kind":"Field","name":{"kind":"Name","value":"seriesName"}},{"kind":"Field","name":{"kind":"Name","value":"seriesOrder"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -781,18 +663,7 @@ export const UpdateVideoMetadataDocument = gql`
       super(apollo);
     }
   }
-export const RecordVideoViewDocument = gql`
-    mutation RecordVideoView($videoId: ID!) {
-  recordVideoView(videoId: $videoId) {
-    success
-    video {
-      id
-      viewCount
-      lastViewTime
-    }
-  }
-}
-    `;
+export const RecordVideoViewDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RecordVideoView"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"recordVideoView"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"videoId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"video"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"viewCount"}},{"kind":"Field","name":{"kind":"Name","value":"lastViewTime"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -804,15 +675,7 @@ export const RecordVideoViewDocument = gql`
       super(apollo);
     }
   }
-export const CreateDirectoryDocument = gql`
-    mutation CreateDirectory($input: CreateDirectoryInput!) {
-  createDirectory(input: $input) {
-    success
-    name
-    path
-  }
-}
-    `;
+export const CreateDirectoryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateDirectory"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateDirectoryInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createDirectory"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"path"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -824,16 +687,7 @@ export const CreateDirectoryDocument = gql`
       super(apollo);
     }
   }
-export const DeleteVideoDocument = gql`
-    mutation DeleteVideo($videoId: ID!) {
-  deleteVideo(videoId: $videoId) {
-    success
-    video {
-      id
-    }
-  }
-}
-    `;
+export const DeleteVideoDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"DeleteVideo"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"deleteVideo"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"videoId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"video"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -845,29 +699,7 @@ export const DeleteVideoDocument = gql`
       super(apollo);
     }
   }
-export const SearchVideosDocument = gql`
-    query SearchVideos($input: VideoSearchInput!) {
-  SearchVideos(input: $input) {
-    pagination {
-      size
-      totalCount
-      currentPageNumber
-    }
-    videos {
-      id
-      name
-      author
-      viewCount
-      loved
-      lastViewTime
-      lastModifyTime
-      thumbnail
-      duration
-      isLocked
-    }
-  }
-}
-    `;
+export const SearchVideosDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"SearchVideos"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"VideoSearchInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"SearchVideos"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"pagination"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"size"}},{"kind":"Field","name":{"kind":"Name","value":"totalCount"}},{"kind":"Field","name":{"kind":"Name","value":"currentPageNumber"}}]}},{"kind":"Field","name":{"kind":"Name","value":"videos"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"author"}},{"kind":"Field","name":{"kind":"Name","value":"viewCount"}},{"kind":"Field","name":{"kind":"Name","value":"loved"}},{"kind":"Field","name":{"kind":"Name","value":"lastViewTime"}},{"kind":"Field","name":{"kind":"Name","value":"lastModifyTime"}},{"kind":"Field","name":{"kind":"Name","value":"thumbnail"}},{"kind":"Field","name":{"kind":"Name","value":"duration"}},{"kind":"Field","name":{"kind":"Name","value":"isLocked"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -879,14 +711,7 @@ export const SearchVideosDocument = gql`
       super(apollo);
     }
   }
-export const GetTopTagsDocument = gql`
-    query GetTopTags {
-  getTopTags {
-    name
-    count
-  }
-}
-    `;
+export const GetTopTagsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetTopTags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getTopTags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"count"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -898,13 +723,7 @@ export const GetTopTagsDocument = gql`
       super(apollo);
     }
   }
-export const GetTopTagsAsSuggestionDocument = gql`
-    query GetTopTagsAsSuggestion {
-  getTopTags {
-    name
-  }
-}
-    `;
+export const GetTopTagsAsSuggestionDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetTopTagsAsSuggestion"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getTopTags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -916,27 +735,7 @@ export const GetTopTagsAsSuggestionDocument = gql`
       super(apollo);
     }
   }
-export const GetVideoByIdDocument = gql`
-    query GetVideoById($videoId: ID!) {
-  getVideoById(videoId: $videoId) {
-    id
-    name
-    tags {
-      name
-    }
-    author
-    viewCount
-    loved
-    lastViewTime
-    lastModifyTime
-    introduction
-    duration
-    seriesName
-    seriesOrder
-    isLocked
-  }
-}
-    `;
+export const GetVideoByIdDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetVideoById"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"ID"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getVideoById"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"videoId"},"value":{"kind":"Variable","name":{"kind":"Name","value":"videoId"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}},{"kind":"Field","name":{"kind":"Name","value":"author"}},{"kind":"Field","name":{"kind":"Name","value":"viewCount"}},{"kind":"Field","name":{"kind":"Name","value":"loved"}},{"kind":"Field","name":{"kind":"Name","value":"lastViewTime"}},{"kind":"Field","name":{"kind":"Name","value":"lastModifyTime"}},{"kind":"Field","name":{"kind":"Name","value":"introduction"}},{"kind":"Field","name":{"kind":"Name","value":"duration"}},{"kind":"Field","name":{"kind":"Name","value":"seriesName"}},{"kind":"Field","name":{"kind":"Name","value":"seriesOrder"}},{"kind":"Field","name":{"kind":"Name","value":"isLocked"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -948,11 +747,7 @@ export const GetVideoByIdDocument = gql`
       super(apollo);
     }
   }
-export const SearchSeriesByPrefixDocument = gql`
-    query SearchSeriesByPrefix($prefix: String!, $limit: Int!) {
-  searchSeriesByPrefix(prefix: $prefix, limit: $limit)
-}
-    `;
+export const SearchSeriesByPrefixDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"SearchSeriesByPrefix"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"prefix"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"limit"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"searchSeriesByPrefix"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"prefix"},"value":{"kind":"Variable","name":{"kind":"Name","value":"prefix"}}},{"kind":"Argument","name":{"kind":"Name","value":"limit"},"value":{"kind":"Variable","name":{"kind":"Name","value":"limit"}}}]}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -964,18 +759,7 @@ export const SearchSeriesByPrefixDocument = gql`
       super(apollo);
     }
   }
-export const GetSeriesVideosDocument = gql`
-    query GetSeriesVideos($name: String!) {
-  getSeriesVideos(name: $name) {
-    id
-    name
-    seriesOrder
-    thumbnail
-    duration
-    isLocked
-  }
-}
-    `;
+export const GetSeriesVideosDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSeriesVideos"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"name"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getSeriesVideos"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"name"},"value":{"kind":"Variable","name":{"kind":"Name","value":"name"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"seriesOrder"}},{"kind":"Field","name":{"kind":"Name","value":"thumbnail"}},{"kind":"Field","name":{"kind":"Name","value":"duration"}},{"kind":"Field","name":{"kind":"Name","value":"isLocked"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -987,11 +771,7 @@ export const GetSeriesVideosDocument = gql`
       super(apollo);
     }
   }
-export const GetSuggestionsDocument = gql`
-    query GetSuggestions($input: SuggestionInput!) {
-  getSuggestions(input: $input)
-}
-    `;
+export const GetSuggestionsDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetSuggestions"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SuggestionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getSuggestions"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}]}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -1003,30 +783,7 @@ export const GetSuggestionsDocument = gql`
       super(apollo);
     }
   }
-export const BrowseDirectoryDocument = gql`
-    query BrowseDirectory($input: RelativePathInput!) {
-  browseDirectory(input: $input) {
-    node {
-      id
-      isDir
-      name
-      tags {
-        name
-      }
-      author
-      loved
-      lastModifyTime
-      introduction
-      size
-      duration
-      seriesName
-      seriesOrder
-      isLocked
-      relativePath
-    }
-  }
-}
-    `;
+export const BrowseDirectoryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"BrowseDirectory"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"RelativePathInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"browseDirectory"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"isDir"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}},{"kind":"Field","name":{"kind":"Name","value":"author"}},{"kind":"Field","name":{"kind":"Name","value":"loved"}},{"kind":"Field","name":{"kind":"Name","value":"lastModifyTime"}},{"kind":"Field","name":{"kind":"Name","value":"introduction"}},{"kind":"Field","name":{"kind":"Name","value":"size"}},{"kind":"Field","name":{"kind":"Name","value":"duration"}},{"kind":"Field","name":{"kind":"Name","value":"seriesName"}},{"kind":"Field","name":{"kind":"Name","value":"seriesOrder"}},{"kind":"Field","name":{"kind":"Name","value":"isLocked"}},{"kind":"Field","name":{"kind":"Name","value":"relativePath"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -1038,30 +795,7 @@ export const BrowseDirectoryDocument = gql`
       super(apollo);
     }
   }
-export const SearchInDirectoryDocument = gql`
-    query SearchInDirectory($input: SearchInDirectoryInput!) {
-  searchInDirectory(input: $input) {
-    node {
-      id
-      isDir
-      name
-      tags {
-        name
-      }
-      author
-      loved
-      lastModifyTime
-      introduction
-      size
-      duration
-      seriesName
-      seriesOrder
-      isLocked
-      relativePath
-    }
-  }
-}
-    `;
+export const SearchInDirectoryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"SearchInDirectory"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"SearchInDirectoryInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"searchInDirectory"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"node"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"isDir"}},{"kind":"Field","name":{"kind":"Name","value":"name"}},{"kind":"Field","name":{"kind":"Name","value":"tags"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"name"}}]}},{"kind":"Field","name":{"kind":"Name","value":"author"}},{"kind":"Field","name":{"kind":"Name","value":"loved"}},{"kind":"Field","name":{"kind":"Name","value":"lastModifyTime"}},{"kind":"Field","name":{"kind":"Name","value":"introduction"}},{"kind":"Field","name":{"kind":"Name","value":"size"}},{"kind":"Field","name":{"kind":"Name","value":"duration"}},{"kind":"Field","name":{"kind":"Name","value":"seriesName"}},{"kind":"Field","name":{"kind":"Name","value":"seriesOrder"}},{"kind":"Field","name":{"kind":"Name","value":"isLocked"}},{"kind":"Field","name":{"kind":"Name","value":"relativePath"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -1073,14 +807,7 @@ export const SearchInDirectoryDocument = gql`
       super(apollo);
     }
   }
-export const GetDirectoryMetadataDocument = gql`
-    query GetDirectoryMetadata($input: RelativePathInput!) {
-  getDirectoryMetadata(input: $input) {
-    totalSize
-    lastModifiedTime
-  }
-}
-    `;
+export const GetDirectoryMetadataDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetDirectoryMetadata"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"RelativePathInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getDirectoryMetadata"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalSize"}},{"kind":"Field","name":{"kind":"Name","value":"lastModifiedTime"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -1092,17 +819,7 @@ export const GetDirectoryMetadataDocument = gql`
       super(apollo);
     }
   }
-export const BatchUpdateSubscriptionDocument = gql`
-    subscription BatchUpdateSubscription($input: VideosBatchOperationInput!) {
-  batchUpdateSubscription(input: $input) {
-    result {
-      resultType
-      message
-    }
-    status
-  }
-}
-    `;
+export const BatchUpdateSubscriptionDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"subscription","name":{"kind":"Name","value":"BatchUpdateSubscription"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"VideosBatchOperationInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchUpdateSubscription"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"result"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"resultType"}},{"kind":"Field","name":{"kind":"Name","value":"message"}}]}},{"kind":"Field","name":{"kind":"Name","value":"status"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -1114,17 +831,7 @@ export const BatchUpdateSubscriptionDocument = gql`
       super(apollo);
     }
   }
-export const BatchDeleteSubscriptionDocument = gql`
-    subscription BatchDeleteSubscription($input: VideosBatchOperationInput!) {
-  batchDeleteSubscription(input: $input) {
-    result {
-      resultType
-      message
-    }
-    status
-  }
-}
-    `;
+export const BatchDeleteSubscriptionDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"subscription","name":{"kind":"Name","value":"BatchDeleteSubscription"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"VideosBatchOperationInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchDeleteSubscription"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"result"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"resultType"}},{"kind":"Field","name":{"kind":"Name","value":"message"}}]}},{"kind":"Field","name":{"kind":"Name","value":"status"}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'

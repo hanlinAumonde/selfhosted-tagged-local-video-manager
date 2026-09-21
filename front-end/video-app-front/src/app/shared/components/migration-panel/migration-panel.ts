@@ -1,4 +1,4 @@
-import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { Component, inject, signal, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -6,7 +6,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { FormsModule } from '@angular/forms';
 import { GqlService } from '../../../services/GQL-service/GQL.service';
 import { MigrationTrackerService } from '../../../services/migration-tracker-service/migration-tracker.service';
 import { ToastService } from '../../../services/toast-service/toast.service';
@@ -30,8 +29,8 @@ type Step = 'select' | 'preflight';
     MatProgressBarModule,
     MatRadioModule,
     MatTooltipModule,
-    FormsModule,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './migration-panel.html'
 })
 export class MigrationPanel {

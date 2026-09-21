@@ -61,6 +61,20 @@ export interface DeleteCheckPanelData {
 
 export type SeriesAction = 'set' | 'clear';
 
+/**
+ * The series half of an edit form, shared by the single-video and batch panels.
+ *
+ * `members` carries the ordering the user drags into place. Where that list comes from
+ * differs per panel — fetched for one video, the current selection for a batch — so only
+ * the shape and the rules are shared.
+ */
+export interface SeriesEdit {
+  modify: boolean;
+  action: SeriesAction;
+  name: string;
+  members: BatchPanelVideoItem[];
+}
+
 /** Which of a batch tag edit's two lists a chip belongs to. */
 export type TagDirection = 'add' | 'remove';
 

@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatIconModule } from '@angular/material/icon';
 import { MigrationTaskList } from '../../shared/components/migration-task-list/migration-task-list';
@@ -15,6 +15,7 @@ interface TaskCategory {
     MatIconModule,
     MigrationTaskList,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './management.html'
 })
 export class Management {

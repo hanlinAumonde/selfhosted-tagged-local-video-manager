@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, effect, OnDestroy, DestroyRef } from '@angular/core';
+import { Component, inject, signal, computed, effect, OnDestroy, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { GqlService } from '../../services/GQL-service/GQL.service';
 import {
   BrowseDirectoryDetail,
@@ -29,6 +29,7 @@ import { ToastType } from '../../shared/models/toast.model';
     BottomToolbar,
     FileBrowseTable
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './file-browser.html'
 })
 export class FileBrowser implements OnDestroy{

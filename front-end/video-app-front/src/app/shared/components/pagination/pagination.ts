@@ -3,6 +3,7 @@ import {
   computed,
   input,
   output,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -12,6 +13,7 @@ import { environment } from '../../../../environments/environment';
   selector: 'app-pagination',
   standalone: true,
   imports: [MatButtonModule, MatIconModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './pagination.html',
 })
 export class Pagination {

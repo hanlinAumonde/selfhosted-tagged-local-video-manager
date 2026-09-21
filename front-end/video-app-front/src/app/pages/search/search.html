@@ -7,13 +7,13 @@
         <span class="text-sm font-medium text-orange-500 bg-orange-100 dark:bg-orange-500/20 px-2 py-0.5 rounded shrink-0">Title</span>
         <input
           type="text"
-          [formControl]="searchForm.controls.title"
+          [formField]="searchForm.title"
           [matAutocomplete]="titleAuto"
-          [class.border-red-500]="title.hasError('maxLength')"
+          [class.border-red-500]="searchForm.title().invalid()"
           class="flex-1 px-3 py-1 outline-none bg-transparent min-w-0 dark:text-gray-100"
           (keydown.enter)="onSearch()"
         />
-        @if (title.value) {
+        @if (searchModel().title) {
           <button
             type="button"
             (click)="clearInput('title')"
@@ -26,7 +26,7 @@
             #titleAuto="matAutocomplete"
             (optionSelected)="updateSearchForm({title: $event.option.value})">
           <!--  (optionSelected)="selectTitleSuggestion($event.option.value)"-->
-          @if(titleSuggestions().loading && title.value !== '') {
+          @if(titleSuggestions().loading && searchModel().title !== '') {
             <mat-option disabled>
               <mat-progress-spinner
                 diameter="20"
@@ -54,13 +54,13 @@
         <span class="text-sm font-medium text-green-600 bg-green-100 dark:bg-green-500/20 px-2 py-0.5 rounded shrink-0">Creator</span>
         <input
           type="text"
-          [formControl]="searchForm.controls.author"
+          [formField]="searchForm.author"
           [matAutocomplete]="authorAuto"
-          [class.border-red-500]="author.hasError('maxLength')"
+          [class.border-red-500]="searchForm.author().invalid()"
           class="flex-1 px-3 py-1 outline-none bg-transparent min-w-0 dark:text-gray-100"
           (keydown.enter)="onSearch()"
         />
-        @if (author.value) {
+        @if (searchModel().author) {
           <button
             type="button"
             (click)="clearInput('author')"
@@ -72,7 +72,7 @@
         <mat-autocomplete
           #authorAuto="matAutocomplete"
           (optionSelected)="updateSearchForm({author: $event.option.value})">
-          @if(authorSuggestions().loading && author.value !== '') {
+          @if(authorSuggestions().loading && searchModel().author !== '') {
             <mat-option disabled>
               <mat-progress-spinner
                 diameter="20"
@@ -95,7 +95,7 @@
       <!-- Search button -->
       <button
         (click)="onSearch()"
-        [disabled]="searchForm.invalid"
+        [disabled]="searchForm().invalid()"
         class="w-10 h-10 rounded-full bg-gray-800 hover:bg-gray-700 dark:bg-gray-600 dark:hover:bg-gray-500 disabled:bg-gray-400 disabled:cursor-not-allowed text-white flex items-center justify-center mr-1 shrink-0"
       >
         <mat-icon fontIcon="search"></mat-icon>
@@ -117,12 +117,12 @@
 
     <!-- Sort selection -->
     <select
-      [ngModel]="searchParams().sortBy"
-      (ngModelChange)="onSortChange($event)"
+      [value]="searchParams().sortBy"
+      (change)="onSortChange(sortValueOf($event))"
       class="h-10 px-4 rounded-md bg-gray-700 dark:bg-gray-600 text-white font-medium cursor-pointer outline-none"
     >
       @for (option of sortOptions; track option.value) {
-        <option [ngValue]="option.value">{{ option.label }}</option>
+        <option [value]="option.value">{{ option.label }}</option>
       }
     </select>
   </div>

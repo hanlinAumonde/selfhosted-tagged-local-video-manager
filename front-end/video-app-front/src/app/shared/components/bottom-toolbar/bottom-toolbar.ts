@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output, signal, viewChild, ElementRef, afterEveryRender, effect, untracked, DestroyRef } from '@angular/core';
+import { Component, computed, inject, input, output, signal, viewChild, ElementRef, afterEveryRender, effect, untracked, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from "@angular/material/button";
 import { PathHistoryService } from '../../../services/path-history-service/path-history.service';
@@ -22,6 +22,7 @@ import {
 @Component({
   selector: 'app-bottom-toolbar',
   imports: [MatIconModule, MatButtonModule, MatMenuModule, MatTooltipModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './bottom-toolbar.html'
 })
 export class BottomToolbar {

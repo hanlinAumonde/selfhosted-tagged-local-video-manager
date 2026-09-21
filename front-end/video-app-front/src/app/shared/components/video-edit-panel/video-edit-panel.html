@@ -1,7 +1,7 @@
 <h2 mat-dialog-title><strong class="font-mono">{{ isFullMode() ? 'Edit video metadata' : 'Filter tags' }}</strong></h2>
 
 <mat-dialog-content>
-  <form [formGroup]="editForm" class="space-y-6" id="edit-form">
+  <div class="space-y-6" id="edit-form">
 
     @if (isFullMode()) {
       <!-- Title + Loved -->
@@ -13,17 +13,15 @@
           <div id="edit-loved" class="flex items-center gap-2">
             <span class="text-xs text-gray-500 dark:text-gray-400">Loved</span>
             <mat-icon (click)="toggleLoved()" class="cursor-pointer"
-              [class.text-pink-500]="editForm.get('loved')?.value">
-              {{ editForm.get('loved')?.value ? 'favorite' : 'favorite_border' }}
+              [class.text-pink-500]="model().loved">
+              {{ model().loved ? 'favorite' : 'favorite_border' }}
             </mat-icon>
           </div>
         </div>
         <mat-form-field appearance="outline" class="w-full">
-          <input matInput formControlName="name" placeholder="Title-video" />
-          @if (editForm.get('name')?.hasError('required') && editForm.get('name')?.touched) {
-            <mat-error>Title is required</mat-error>
-          } @else if (editForm.get('name')?.hasError('maxLength')) {
-            <mat-error>Title too long (max {{ editForm.get('name')?.errors?.['maxLength']?.max }})</mat-error>
+          <input matInput [formField]="editForm.name" placeholder="Title-video" />
+          @if (editForm.name().touched() && editForm.name().invalid()) {
+            <mat-error>{{ editForm.name().errors()[0].message }}</mat-error>
           }
         </mat-form-field>
       </section>
@@ -36,11 +34,11 @@
         <mat-form-field appearance="outline" class="w-full">
           <input
             matInput
-            formControlName="author"
+            [formField]="editForm.author"
             placeholder="search"
             [matAutocomplete]="authorAuto" />
-          @if (editForm.get('author')?.hasError('maxLength')) {
-            <mat-error>Author too long (max {{ editForm.get('author')?.errors?.['maxLength']?.max }})</mat-error>
+          @if (editForm.author().invalid()) {
+            <mat-error>{{ editForm.author().errors()[0].message }}</mat-error>
           }
           <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
           <mat-autocomplete
@@ -75,11 +73,11 @@
         <mat-form-field appearance="outline" class="w-full">
           <textarea
             matInput
-            formControlName="introduction"
+            [formField]="editForm.introduction"
             placeholder="Enter introduction"
             rows="4"></textarea>
-          @if (editForm.get('introduction')?.hasError('maxLength')) {
-            <mat-error>Introduction too long (max {{ editForm.get('introduction')?.errors?.['maxLength']?.max }})</mat-error>
+          @if (editForm.introduction().invalid()) {
+            <mat-error>{{ editForm.introduction().errors()[0].message }}</mat-error>
           }
         </mat-form-field>
       </section>
@@ -91,16 +89,16 @@
         </label>
         <div class="flex items-center justify-between">
           <mat-slide-toggle
-            formControlName="modifySeries"
+            [formField]="editForm.series.modify"
             (change)="onModifySeriesToggle($event.checked)">
             <span class="font-medium">Modify series</span>
           </mat-slide-toggle>
-          @if (!modifySeries()) {
+          @if (!model().series.modify) {
             <span class="text-xs text-gray-500 dark:text-gray-400">
               Series fields stay untouched.
               @if (video()?.seriesName) {
                 Currently in: <strong>{{ video()?.seriesName }}</strong>
-                @if (video()?.seriesOrder !== null && video()?.seriesOrder !== undefined) {
+                @if (video()?.seriesOrder != null) {
                   (order {{ video()?.seriesOrder }})
                 }
               } @else {
@@ -110,8 +108,8 @@
           }
         </div>
 
-        @if (modifySeries()) {
-          <mat-radio-group formControlName="seriesAction" class="flex gap-6 mb-3">
+        @if (model().series.modify) {
+          <mat-radio-group [formField]="editForm.series.action" class="flex gap-6 mb-3">
             <mat-radio-button value="set">
               <span class="font-medium">Assign</span>
             </mat-radio-button>
@@ -120,39 +118,11 @@
             </mat-radio-button>
           </mat-radio-group>
 
-          @if (seriesAction() === 'set') {
+          @if (model().series.action === 'set') {
             <div class="flex flex-col gap-2">
-              <mat-form-field appearance="outline" class="w-full">
-                <mat-label>Series name</mat-label>
-                <input
-                  matInput
-                  formControlName="seriesName"
-                  placeholder="Search or type a new series name"
-                  [matAutocomplete]="seriesAuto"
-                  (input)="onSeriesNameInput($any($event.target).value)" />
-                @if (editForm.get('seriesName')?.hasError('maxLength')) {
-                  <mat-error>Series name too long (max {{ editForm.get('seriesName')?.errors?.['maxLength']?.max }})</mat-error>
-                }
-                <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-                <mat-autocomplete
-                  #seriesAuto="matAutocomplete"
-                  (optionSelected)="selectSeriesSuggestion($event.option.value)">
-                  @if(seriesSuggestions().loading) {
-                    <mat-option disabled>
-                      <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>
-                      <span class="ml-2">Loading...</span>
-                    </mat-option>
-                  }@else if(seriesSuggestions().data && seriesSuggestions().data!.length > 0){
-                    @for (series of seriesSuggestions().data; track series) {
-                      <mat-option [value]="series">
-                        <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ series }}</span>
-                      </mat-option>
-                    }
-                  }@else{
-                    <mat-option disabled>No series matched — type to create a new one</mat-option>
-                  }
-                </mat-autocomplete>
-              </mat-form-field>
+              <app-series-name-input
+                [formField]="editForm.series.name"
+                (suggestionPicked)="onSeriesSuggestionPicked($event)" />
 
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 Drag this video to its new position in the series. Only this video can be moved.
@@ -164,9 +134,9 @@
                 </div>
               } @else {
                 <app-series-reorder-list
-                  [items]="seriesMembers()"
+                  [items]="model().series.members"
                   [movableId]="currentVideoId()"
-                  (itemsChange)="seriesMembers.set($event)" />
+                  (itemsChange)="onSeriesMembersChange($event)" />
               }
             </div>
           } @else {
@@ -183,63 +153,14 @@
       <label class="text-sm font-semibold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-500/20 px-3 py-1 rounded-full inline-block w-fit">
         Tags:
       </label>
-
-      <!-- Selected tag -->
-      @if (tagsError()) {
-        <div class="text-red-500 text-sm">{{ tagsError() }}</div>
-      }
-      @if (tags().length > 0) {
-        <div class="flex flex-wrap gap-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
-          @for (tag of tags(); track tag) {
-            <mat-chip class="bg-white! dark:bg-neutral-600! border! border-neutral-300! dark:border-neutral-500!">
-              <span class="font-medium">{{ tag }}</span>
-              <button matChipRemove (click)="removeTag(tag)" aria-label="Remove tag">
-                <mat-icon class="text-base!">cancel</mat-icon>
-              </button>
-            </mat-chip>
-          }
-        </div>
-      }
-
-      <!-- Tag input and suggestions -->
-      <mat-form-field appearance="outline" class="w-full">
-        <input
-          matInput
-          formControlName="tagInput"
-          placeholder="search"
-          [matAutocomplete]="tagAuto"
-          (keydown.enter)="onTagInputEnter($event)" />
-        @if (editForm.get('tagInput')?.hasError('maxLength')) {
-          <mat-error>Tag too long (max {{ editForm.get('tagInput')?.errors?.['maxLength']?.max }})</mat-error>
-        }
-        <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-        <mat-autocomplete
-          #tagAuto="matAutocomplete"
-          (optionSelected)="selectTagSuggestion($event.option.value)">
-          @if(tagSuggestions().loading) {
-            <mat-option disabled>
-              <mat-progress-spinner
-                diameter="20"
-                mode="indeterminate">
-              </mat-progress-spinner>
-              <span class="ml-2">Loading...</span>
-            </mat-option>
-          }@else if(tagSuggestions().data && tagSuggestions().data!.length > 0){
-            @for (tag of tagSuggestions().data; track tag) {
-            <mat-option [value]="tag">
-              <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ tag }}</span>
-            </mat-option>
-            }
-          }@else{
-            <mat-option disabled>
-              No tag-suggestions available, type Enter to add as new tag
-            </mat-option>
-          }
-        </mat-autocomplete>
-      </mat-form-field>
+      <app-tag-chip-input
+        [formField]="editForm.tags"
+        label=""
+        placeholder="search"
+        emptyHint="No tag-suggestions available, type Enter to add as new tag" />
     </section>
 
-  </form>
+  </div>
 </mat-dialog-content>
 
 <mat-dialog-actions [align]="'end'">
@@ -253,7 +174,7 @@
     matButton="tonal"
     type="button"
     (click)="handleSave()"
-    [disabled]="isFullMode() && (editForm.invalid || isSaving() || tagsError())"
+    [disabled]="editForm().invalid() || editForm().submitting()"
     color="primary">
     {{ saveButtonText() }}
   </button>

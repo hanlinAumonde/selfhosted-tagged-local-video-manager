@@ -1,10 +1,10 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { PageStateService } from '../../../services/Page-state-service/page-state.service';
-import { environment } from '../../../../environments/environment.development';
+import { environment } from '../../../../environments/environment';
 
 interface NavItem {
   path: string;
@@ -15,6 +15,7 @@ interface NavItem {
 @Component({
   selector: 'app-sidebar',
   imports: [RouterLink, RouterLinkActive, MatIconModule, MatButtonModule, MatTooltipModule],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './sidebar.html'
 })
 export class Sidebar {

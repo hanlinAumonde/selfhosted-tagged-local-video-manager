@@ -10,7 +10,8 @@ import {
   signal,
   DestroyRef,
   afterNextRender,
-  untracked
+  untracked,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -46,6 +47,7 @@ import { MigrationPanel } from '../migration-panel/migration-panel';
     MatTooltipModule,
     RouterLink
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './file-browse-table.html'
 })
 export class FileBrowseTable {

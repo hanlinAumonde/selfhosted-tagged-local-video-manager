@@ -1,10 +1,9 @@
 import { ApplicationConfig, inject, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { 
-  HTTP_INTERCEPTORS, 
-  provideHttpClient, 
-  withFetch, 
-  withInterceptorsFromDi 
+import {
+  HTTP_INTERCEPTORS,
+  provideHttpClient,
+  withInterceptorsFromDi
 } from '@angular/common/http';
 import { provideApollo } from 'apollo-angular';
 import { environment } from '../environments/environment';
@@ -21,11 +20,8 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
-    provideHttpClient(),
-    provideHttpClient(
-      withFetch(),
-      withInterceptorsFromDi()
-    ),
+    // Fetch is the default backend as of v22, so `withFetch()` is no longer needed.
+    provideHttpClient(withInterceptorsFromDi()),
     {
       provide: HTTP_INTERCEPTORS,
       useClass: ImageRequestInterceptor,

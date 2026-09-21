@@ -1,4 +1,4 @@
-import { Component, inject, signal, DestroyRef, OnInit } from '@angular/core';
+import { Component, inject, signal, DestroyRef, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
@@ -26,6 +26,7 @@ import { Pagination } from '../pagination/pagination';
     MatTooltipModule,
     Pagination,
   ],
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './migration-task-list.html'
 })
 export class MigrationTaskList implements OnInit {

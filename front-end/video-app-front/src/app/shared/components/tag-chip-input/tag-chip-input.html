@@ -1,0 +1,53 @@
+<div class="flex flex-col gap-2">
+  @if (errors().length > 0) {
+    <div class="text-red-500 text-sm">{{ errors()[0].message }}</div>
+  }
+
+  @if (value().length > 0) {
+    <mat-chip-set>
+      @for (tag of value(); track tag) {
+        <mat-chip [class]="chipClass()">
+          <span class="font-medium">{{ tag }}</span>
+          <button matChipRemove type="button" (click)="remove(tag)" [attr.aria-label]="'Remove ' + tag">
+            <mat-icon class="text-base!" fontIcon="cancel"></mat-icon>
+          </button>
+        </mat-chip>
+      }
+    </mat-chip-set>
+  }
+
+  <mat-form-field appearance="outline" class="w-full">
+    @if (label()) {
+      <mat-label>{{ label() }}</mat-label>
+    }
+    <input
+      matInput
+      autocomplete="off"
+      [value]="draft()"
+      [placeholder]="placeholder()"
+      [matAutocomplete]="tagAuto"
+      (input)="onDraftInput($event)"
+      (blur)="touch.emit()"
+      (keydown.enter)="onEnter($event)" />
+    @if (draftError(); as message) {
+      <mat-error>{{ message }}</mat-error>
+    }
+    <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
+    <mat-autocomplete #tagAuto="matAutocomplete" (optionSelected)="commit($event.option.value)">
+      @if (suggestions().loading) {
+        <mat-option disabled>
+          <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>
+          <span class="ml-2">Loading...</span>
+        </mat-option>
+      } @else if (suggestions().data && suggestions().data!.length > 0) {
+        @for (tag of suggestions().data; track tag) {
+          <mat-option [value]="tag">
+            <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ tag }}</span>
+          </mat-option>
+        }
+      } @else {
+        <mat-option disabled>{{ emptyHint() }}</mat-option>
+      }
+    </mat-autocomplete>
+  </mat-form-field>
+</div>
