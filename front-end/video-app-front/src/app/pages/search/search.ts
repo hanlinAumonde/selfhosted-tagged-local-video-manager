@@ -1,8 +1,8 @@
-import { Component, inject, computed, effect, signal, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Component, inject, computed, effect, signal, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { debounceTime, Subject, switchMap } from 'rxjs';
 import { ActivatedRoute, Router } from '@angular/router';
-import { FormBuilder, FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { form, FormField } from '@angular/forms/signals';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
@@ -23,15 +23,14 @@ import { SearchFrom, VideoSortOption, SearchField } from '../../core/graphql/gen
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { environment } from '../../../environments/environment';
 import { PageStateService } from '../../services/Page-state-service/page-state.service';
-import { ValidationService } from '../../services/validation-service/validation.service';
+import { maxLengthRule } from '../../services/validation-service/validation.rules';
 import { VideoUpdateEventService } from '../../services/video-update-event-service/video-update-event.service';
 import { VideoUpdateType } from '../../shared/models/events.model';
 
 @Component({
   selector: 'app-search',
   imports: [
-    ReactiveFormsModule,
-    FormsModule,
+    FormField,
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
@@ -51,9 +50,7 @@ export class Search {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private dialog = inject(MatDialog);
-  private fb = inject(FormBuilder);
   private stateService = inject(PageStateService);
-  private validationService = inject(ValidationService);
   private videoUpdateEventService = inject(VideoUpdateEventService);
 
   private updateSearchParamsAndForm(params: SearchPageParam) {
@@ -63,9 +60,9 @@ export class Search {
         title: params.title ?? this.searchParams().title,
         author: params.author ?? this.searchParams().author
     });
-    this.searchForm.patchValue({
-        title: this.searchParams().title,
-        author: this.searchParams().author
+    this.searchModel.set({
+        title: this.searchParams().title ?? '',
+        author: this.searchParams().author ?? ''
     });
   }
 
@@ -97,13 +94,19 @@ export class Search {
 
   searchParams = signal<SearchPageParam>(this.DEFAULT_SEARCH_PARAMS);
 
-  searchForm = this.fb.group({
-    title: [this.searchParams().title ?? '', [this.validationService.searchKeywordValidator()]],
-    author: [this.searchParams().author ?? '', [this.validationService.searchKeywordValidator()]]
+  /*
+    The draft the user is typing, kept apart from `searchParams`: editing a field does not
+    search, and `searchParams` only moves when a search is actually run.
+  */
+  protected searchModel = signal({
+    title: this.searchParams().title ?? '',
+    author: this.searchParams().author ?? ''
   });
 
-  get title() { return this.searchForm.get('title') as FormControl<string>; }
-  get author() { return this.searchForm.get('author') as FormControl<string>; }
+  searchForm = form(this.searchModel, path => {
+    maxLengthRule(path.title, environment.VALIDATION_RULES.NAME_MAX_LENGTH);
+    maxLengthRule(path.author, environment.VALIDATION_RULES.NAME_MAX_LENGTH);
+  });
 
   currentPage = toSignal(
     this.route.queryParams.pipe(
@@ -116,12 +119,18 @@ export class Search {
   );
 
   titleSuggestions = toSignal(
-    this.gqlService.getSuggestionsQuery(this.title.valueChanges, SearchField.Name),
+    this.gqlService.getSuggestionsQuery(
+      toObservable(computed(() => this.searchModel().title)),
+      SearchField.Name
+    ),
     { initialValue: this.gqlService.initialSignalData<string[]>([]) }
   );
 
   authorSuggestions = toSignal(
-    this.gqlService.getSuggestionsQuery(this.author.valueChanges, SearchField.Author),
+    this.gqlService.getSuggestionsQuery(
+      toObservable(computed(() => this.searchModel().author)),
+      SearchField.Author
+    ),
     { initialValue: this.gqlService.initialSignalData<string[]>([]) }
   );
 
@@ -229,13 +238,13 @@ export class Search {
   }
 
   onSearch() {
-    if (this.searchForm.invalid) return;
+    if (this.searchForm().invalid()) return;
 
-    const formValue = this.searchForm.value;
+    const draft = this.searchModel();
     const newParams: SearchPageParam = {
       ...this.searchParams(),
-      title: formValue.title ?? '',
-      author: formValue.author ?? ''
+      title: draft.title,
+      author: draft.author
     };
     this.updateSearchParamsAndForm(newParams);
 
@@ -243,6 +252,14 @@ export class Search {
       this.hasSearched.set(true);
     }
     this.navigateToPage(1);
+  }
+
+  /** Updates only the fields passed in; an omitted field keeps whatever the user has typed. */
+  updateSearchForm(searchFormInputs: {title?: string, author?: string}) {
+    this.searchModel.update(draft => ({
+      title: searchFormInputs.title ?? draft.title,
+      author: searchFormInputs.author ?? draft.author
+    }));
   }
 
   clearInput(field: "title" | "author") {
@@ -253,11 +270,9 @@ export class Search {
     }
   }
 
-  updateSearchForm(searchFormInputs: {title?: string, author?: string}) {
-    this.searchForm.patchValue({ 
-      title: searchFormInputs.title ?? this.searchParams().title, 
-      author: searchFormInputs.author ?? this.searchParams().author 
-    });
+  /** Reads the sort value off the native select, which hands back the option's string value. */
+  protected sortValueOf(event: Event): VideoSortOption {
+    return (event.target as HTMLSelectElement).value as VideoSortOption;
   }
 
   onSortChange(sortBy: VideoSortOption) {

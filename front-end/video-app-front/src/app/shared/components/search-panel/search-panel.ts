@@ -1,9 +1,8 @@
 import { Component, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
+import { apply, form, FormField, FormRoot, submit } from '@angular/forms/signals';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
-import { MatChipsModule } from '@angular/material/chips';
 import {
   MAT_DIALOG_DATA,
   MatDialogActions,
@@ -15,26 +14,28 @@ import {
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { startWith } from 'rxjs/operators';
+import { environment } from '../../../../environments/environment';
 import { SearchField } from '../../../core/graphql/generated/graphql';
 import { GqlService } from '../../../services/GQL-service/GQL.service';
-import { ValidationService } from '../../../services/validation-service/validation.service';
+import { maxLengthRule, tagListRule } from '../../../services/validation-service/validation.rules';
 import { DirectorySearchCriteria, SearchPanelData } from '../../models/panels.model';
+import { TagChipInput } from '../tag-chip-input/tag-chip-input';
 
 @Component({
   selector: 'app-search-panel',
   imports: [
-    ReactiveFormsModule,
+    FormField,
+    FormRoot,
     MatAutocompleteModule,
     MatButtonModule,
-    MatChipsModule,
     MatDialogActions,
     MatDialogClose,
     MatDialogContent,
     MatDialogTitle,
     MatFormFieldModule,
     MatIconModule,
-    MatInputModule
+    MatInputModule,
+    TagChipInput
   ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './search-panel.html'
@@ -42,41 +43,38 @@ import { DirectorySearchCriteria, SearchPanelData } from '../../models/panels.mo
 export class SearchPanel {
   readonly dialogRef = inject(MatDialogRef<SearchPanel, DirectorySearchCriteria>);
   readonly data = inject<SearchPanelData>(MAT_DIALOG_DATA);
-  private fb = inject(FormBuilder);
   private gqlService = inject(GqlService);
-  private validationService = inject(ValidationService);
 
-  searchForm = this.fb.group({
-    name: ['', [this.validationService.searchKeywordValidator()]],
-    author: ['', [this.validationService.authorValidator()]],
-    tagInput: ['', [this.validationService.tagValidator()]]
+  protected searchModel = signal({
+    name: '',
+    author: '',
+    tags: [] as string[]
   });
 
-  tags = signal<string[]>([]);
+  searchForm = form(
+    this.searchModel,
+    path => {
+      maxLengthRule(path.name, environment.VALIDATION_RULES.NAME_MAX_LENGTH);
+      maxLengthRule(path.author, environment.VALIDATION_RULES.AUTHOR_MAX_LENGTH);
+      apply(path.tags, tagListRule);
+    },
+    { submission: { action: () => this.closeWithCriteria() } },
+  );
 
   nameSuggestions = toSignal(
-    this.gqlService.getSuggestionsQuery(this.searchForm.controls.name.valueChanges, SearchField.Name),
-    { initialValue: this.gqlService.initialSignalData<string[]>([]) }
-  );
-
-  authorSuggestions = toSignal(
-    this.gqlService.getSuggestionsQuery(this.searchForm.controls.author.valueChanges, SearchField.Author),
-    { initialValue: this.gqlService.initialSignalData<string[]>([]) }
-  );
-
-  tagSuggestions = toSignal(
     this.gqlService.getSuggestionsQuery(
-      this.searchForm.controls.tagInput.valueChanges.pipe(
-        startWith(this.searchForm.controls.tagInput.value)
-      ),
-      SearchField.Tag
+      toObservable(computed(() => this.searchModel().name)),
+      SearchField.Name
     ),
     { initialValue: this.gqlService.initialSignalData<string[]>([]) }
   );
 
-  private formValue = toSignal(
-    this.searchForm.valueChanges.pipe(startWith(this.searchForm.value)),
-    { initialValue: this.searchForm.value }
+  authorSuggestions = toSignal(
+    this.gqlService.getSuggestionsQuery(
+      toObservable(computed(() => this.searchModel().author)),
+      SearchField.Author
+    ),
+    { initialValue: this.gqlService.initialSignalData<string[]>([]) }
   );
 
   /**
@@ -84,37 +82,22 @@ export class SearchPanel {
    * backend refuses it rather than walking the whole tree for nothing.
    */
   canSearch = computed(() => {
-    const value = this.formValue();
-    return !!(value.name?.trim() || value.author?.trim() || this.tags().length > 0);
+    const draft = this.searchModel();
+    return !!(draft.name.trim() || draft.author.trim() || draft.tags.length > 0);
   });
 
-  addTag(tagValue?: string) {
-    const value = (tagValue || this.searchForm.value.tagInput || '').trim();
-    if (!value) return;
-    if (!this.validationService.validateTag(value).valid) return;
-    if (!this.validationService.validateTagsArray([...this.tags(), value]).valid) return;
-
-    if (!this.tags().includes(value)) {
-      this.tags.update(tags => [...tags, value]);
-    }
-    this.searchForm.patchValue({ tagInput: '' });
-  }
-
-  removeTag(tag: string) {
-    this.tags.update(tags => tags.filter(t => t !== tag));
-  }
-
-  onTagInputEnter(event: Event) {
-    event.preventDefault();
-    this.addTag();
-  }
-
   search() {
-    if (this.searchForm.invalid || !this.canSearch()) return;
+    if (!this.canSearch()) return;
+    submit(this.searchForm);
+  }
+
+  private async closeWithCriteria(): Promise<null> {
+    const draft = this.searchModel();
     this.dialogRef.close({
-      name: (this.searchForm.value.name ?? '').trim(),
-      author: (this.searchForm.value.author ?? '').trim(),
-      tags: this.tags()
+      name: draft.name.trim(),
+      author: draft.author.trim(),
+      tags: draft.tags
     });
+    return null;
   }
 }

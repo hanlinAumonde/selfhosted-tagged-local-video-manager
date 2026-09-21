@@ -1,7 +1,7 @@
 <h2 mat-dialog-title><strong class="font-mono">Batch Operation</strong></h2>
 
 <mat-dialog-content>
-  <form [formGroup]="form" class="space-y-6">
+  <div class="space-y-6">
     <!-- Selected target info -->
     <div class="bg-gray-100 dark:bg-gray-700 rounded-lg p-3">
       @if (isVideoMode) {
@@ -31,17 +31,17 @@
           <mat-form-field appearance="outline" class="w-full pt-5">
             <input
               matInput
-              formControlName="authorInput"
+              [formField]="batchForm.author"
               placeholder="search"
               [matAutocomplete]="authorAuto" />
-            @if (form.get('authorInput')?.hasError('maxLength')) {
-              <mat-error>Author too long (max {{ form.get('authorInput')?.errors?.['maxLength']?.max }})</mat-error>
+            @if (batchForm.author().invalid()) {
+              <mat-error>{{ batchForm.author().errors()[0].message }}</mat-error>
             }
             <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
             <mat-autocomplete
               #authorAuto="matAutocomplete"
               (optionSelected)="selectAuthorSuggestion($event.option.value)">
-              @if(authorSuggestions().loading && authorInput.value !== '') {
+              @if(authorSuggestions().loading && model().author !== '') {
                 <mat-option disabled>
                   <mat-progress-spinner
                     diameter="20"
@@ -79,9 +79,6 @@
           Leave a list empty to leave that direction alone.
         </p>
 
-        @if (tagsError()) {
-          <div class="text-red-500 text-sm">{{ tagsError() }}</div>
-        }
         @if (conflictingTag(); as conflict) {
           <div class="flex items-start gap-2 p-2 mb-2 rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200 text-xs">
             <mat-icon class="text-base!" fontIcon="warning"></mat-icon>
@@ -91,95 +88,25 @@
 
         <!-- Add -->
         <label class="text-sm font-medium text-green-700 dark:text-green-400">Add tags</label>
-        @if (addTags().length > 0) {
-          <div class="flex flex-wrap gap-2 p-3 mt-1 bg-gray-50 dark:bg-gray-700 rounded-lg">
-            @for (tag of addTags(); track tag) {
-              <mat-chip class="bg-white! dark:bg-gray-600! border! border-green-300! dark:border-green-600!">
-                <span class="font-medium">{{ tag }}</span>
-                <button matChipRemove (click)="removeTag('add', tag)" aria-label="Remove tag from the add list">
-                  <mat-icon class="text-base!" fontIcon="cancel"></mat-icon>
-                </button>
-              </mat-chip>
-            }
-          </div>
-        }
-        <mat-form-field appearance="outline" class="w-full mt-1">
-          <input
-            matInput
-            formControlName="addTagInput"
-            placeholder="Enter a tag to add"
-            [matAutocomplete]="addTagAuto"
-            (keydown.enter)="onTagInputEnter('add', $event)" />
-          @if (form.get('addTagInput')?.hasError('maxLength')) {
-            <mat-error>Tag too long (max {{ form.get('addTagInput')?.errors?.['maxLength']?.max }})</mat-error>
-          }
-          <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-          <mat-autocomplete
-            #addTagAuto="matAutocomplete"
-            (optionSelected)="selectTagSuggestion('add', $event.option.value)">
-            @if(addTagSuggestions().loading) {
-              <mat-option disabled>
-                <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>
-                <span class="ml-2">Loading...</span>
-              </mat-option>
-            }@else if(addTagSuggestions().data && addTagSuggestions().data!.length > 0){
-              @for (tag of addTagSuggestions().data; track tag) {
-                <mat-option [value]="tag">
-                  <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ tag }}</span>
-                </mat-option>
-              }
-            }@else{
-              <mat-option disabled>
-                No tag suggestions available, type Enter to add as new tag
-              </mat-option>
-            }
-          </mat-autocomplete>
-        </mat-form-field>
+        <app-tag-chip-input
+          [formField]="batchForm.addTags"
+          label=""
+          placeholder="Enter a tag to add"
+          chipClass="bg-white! dark:bg-gray-600! border! border-green-300! dark:border-green-600!"
+          emptyHint="No tag suggestions available, type Enter to add as new tag"
+          [disallowed]="model().removeTags"
+          (rejected)="conflictingTag.set($event)" />
 
         <!-- Remove -->
         <label class="text-sm font-medium text-red-700 dark:text-red-400">Remove tags</label>
-        @if (removeTags().length > 0) {
-          <div class="flex flex-wrap gap-2 p-3 mt-1 bg-gray-50 dark:bg-gray-700 rounded-lg">
-            @for (tag of removeTags(); track tag) {
-              <mat-chip class="bg-white! dark:bg-gray-600! border! border-red-300! dark:border-red-600!">
-                <span class="font-medium">{{ tag }}</span>
-                <button matChipRemove (click)="removeTag('remove', tag)" aria-label="Remove tag from the remove list">
-                  <mat-icon class="text-base!" fontIcon="cancel"></mat-icon>
-                </button>
-              </mat-chip>
-            }
-          </div>
-        }
-        <mat-form-field appearance="outline" class="w-full mt-1">
-          <input
-            matInput
-            formControlName="removeTagInput"
-            placeholder="Enter a tag to remove"
-            [matAutocomplete]="removeTagAuto"
-            (keydown.enter)="onTagInputEnter('remove', $event)" />
-          @if (form.get('removeTagInput')?.hasError('maxLength')) {
-            <mat-error>Tag too long (max {{ form.get('removeTagInput')?.errors?.['maxLength']?.max }})</mat-error>
-          }
-          <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-          <mat-autocomplete
-            #removeTagAuto="matAutocomplete"
-            (optionSelected)="selectTagSuggestion('remove', $event.option.value)">
-            @if(removeTagSuggestions().loading) {
-              <mat-option disabled>
-                <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>
-                <span class="ml-2">Loading...</span>
-              </mat-option>
-            }@else if(removeTagSuggestions().data && removeTagSuggestions().data!.length > 0){
-              @for (tag of removeTagSuggestions().data; track tag) {
-                <mat-option [value]="tag">
-                  <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ tag }}</span>
-                </mat-option>
-              }
-            }@else{
-              <mat-option disabled>No tag suggestions available</mat-option>
-            }
-          </mat-autocomplete>
-        </mat-form-field>
+        <app-tag-chip-input
+          [formField]="batchForm.removeTags"
+          label=""
+          placeholder="Enter a tag to remove"
+          chipClass="bg-white! dark:bg-gray-600! border! border-red-300! dark:border-red-600!"
+          emptyHint="No tag suggestions available, type Enter to add as new tag"
+          [disallowed]="model().addTags"
+          (rejected)="conflictingTag.set($event)" />
       </mat-expansion-panel>
 
       @if (isVideoMode) {
@@ -197,18 +124,18 @@
           </mat-expansion-panel-header>
 
           <div class="flex items-center justify-between mb-3" (click)="$event.stopPropagation()">
-            <mat-slide-toggle formControlName="modifySeries">
+            <mat-slide-toggle [formField]="batchForm.series.modify">
               <span class="font-medium">Modify series</span>
             </mat-slide-toggle>
-            @if (!modifySeries()) {
+            @if (!model().series.modify) {
               <span class="text-xs text-gray-500 dark:text-gray-400">
                 Series fields stay untouched.
               </span>
             }
           </div>
 
-          @if (modifySeries()) {
-          <mat-radio-group formControlName="seriesAction" class="flex gap-6 mb-3">
+          @if (model().series.modify) {
+          <mat-radio-group [formField]="batchForm.series.action" class="flex gap-6 mb-3">
             <mat-radio-button value="set">
               <span class="font-medium">Assign</span>
             </mat-radio-button>
@@ -217,37 +144,8 @@
             </mat-radio-button>
           </mat-radio-group>
 
-          @if (seriesAction() === 'set') {
-            <mat-form-field appearance="outline" class="w-full">
-              <mat-label>Series name</mat-label>
-              <input
-                matInput
-                formControlName="seriesName"
-                placeholder="Search or type a new series name"
-                [matAutocomplete]="seriesAuto" />
-              @if (form.get('seriesName')?.hasError('maxLength')) {
-                <mat-error>Series name too long (max {{ form.get('seriesName')?.errors?.['maxLength']?.max }})</mat-error>
-              }
-              <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-              <mat-autocomplete
-                #seriesAuto="matAutocomplete"
-                (optionSelected)="selectSeriesSuggestion($event.option.value)">
-                @if (seriesSuggestions().loading) {
-                  <mat-option disabled>
-                    <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>
-                    <span class="ml-2">Loading...</span>
-                  </mat-option>
-                } @else if (seriesSuggestions().data && seriesSuggestions().data!.length > 0) {
-                  @for (series of seriesSuggestions().data; track series) {
-                    <mat-option [value]="series">
-                      <span class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-sm">{{ series }}</span>
-                    </mat-option>
-                  }
-                } @else {
-                  <mat-option disabled>No series matched — type to create a new one</mat-option>
-                }
-              </mat-autocomplete>
-            </mat-form-field>
+          @if (model().series.action === 'set') {
+            <app-series-name-input [formField]="batchForm.series.name" />
 
             @if (seriesConflictWarning(); as warning) {
               <div class="flex items-start gap-2 p-2 mb-2 rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200 text-xs">
@@ -256,13 +154,13 @@
               </div>
             }
 
-            @if (orderedVideos().length > 0) {
+            @if (model().series.members.length > 0) {
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
                 Reorder the selected videos. Positions will be used as the series order.
               </p>
               <app-series-reorder-list
-                [items]="orderedVideos()"
-                (itemsChange)="orderedVideos.set($event)" />
+                [items]="model().series.members"
+                (itemsChange)="onSeriesMembersChange($event)" />
             }
           } @else {
             <p class="text-sm text-red-600 dark:text-red-400">
@@ -274,11 +172,11 @@
       }
     </mat-accordion>
     <br/>
-  </form>
+  </div>
 </mat-dialog-content>
 
 <mat-dialog-actions [align]="'end'">
-  @if(isSaving()){
+  @if (batchForm().submitting()) {
     <p class="text-sm text-gray-600 dark:text-gray-300">{{processingMessage()}}</p>
     <mat-progress-bar mode="indeterminate"></mat-progress-bar>
   }
@@ -287,7 +185,7 @@
       matButton="outlined"
       type="button"
       (click)="handleCancel()"
-      [disabled]="isSaving()"  
+      [disabled]="batchForm().submitting()"  
     >
       Cancel
     </button>
@@ -295,9 +193,9 @@
       matButton="tonal"
       type="button"
       (click)="handleSave()"
-      [disabled]="isSaving() || isInvalid()"
+      [disabled]="isInvalid() || batchForm().submitting()"
       color="primary">
-      @if (isSaving()) {
+      @if (batchForm().submitting()) {
         <span class="flex">
           <mat-spinner [diameter]="20"></mat-spinner>
           <span class="mx-2">{{isVideoMode? 'Editing...' : 'Syncing...'}}</span>

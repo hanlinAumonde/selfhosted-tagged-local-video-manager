@@ -1,178 +1,160 @@
-import { Component, OnInit, signal, computed, inject, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import {
-  FormBuilder,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
+import { Component, signal, computed, effect, inject, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
+import { apply, form, FormField, required, submit } from '@angular/forms/signals';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatButtonModule } from '@angular/material/button';
-import { MatChipsModule } from '@angular/material/chips';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { debounceTime, distinctUntilChanged, startWith, switchMap } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 import { SearchField, SeriesFieldInput, SeriesOrderEntryInput } from '../../../core/graphql/generated/graphql';
 import {
   VideoEditPanelMode,
   VideoEditPanelData,
   EditableVideo,
   BatchPanelVideoItem,
+  SeriesEdit,
 } from '../../models/panels.model';
 import { GqlService } from '../../../services/GQL-service/GQL.service';
 import { VideoMutationDetail, SeriesVideosDetail } from '../../models/GQL-result.model';
-import { ValidationService } from '../../../services/validation-service/validation.service';
+import { maxLengthRule, seriesEditSchema, tagListRule } from '../../../services/validation-service/validation.rules';
 import { ToastService } from '../../../services/toast-service/toast.service';
 import { VideoUpdateEventService } from '../../../services/video-update-event-service/video-update-event.service';
 import { ToastDisplayer } from "../toast-displayer/toast-displayer";
 import { ToastType } from '../../models/toast.model';
+import { SeriesNameInput } from '../series-name-input/series-name-input';
 import { SeriesReorderList } from '../series-reorder-list/series-reorder-list';
+import { TagChipInput } from '../tag-chip-input/tag-chip-input';
 
 @Component({
   selector: 'app-video-edit-panel',
   imports: [
-    ReactiveFormsModule,
+    FormField,
     MatDialogModule,
     MatFormFieldModule,
     MatInputModule,
-    MatCheckboxModule,
     MatButtonModule,
-    MatChipsModule,
     MatAutocompleteModule,
     MatIconModule,
     MatProgressSpinnerModule,
     MatRadioModule,
     MatSlideToggleModule,
     ToastDisplayer,
+    SeriesNameInput,
     SeriesReorderList,
-],
+    TagChipInput,
+  ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './video-edit-panel.html'
 })
-export class VideoEditPanel implements OnInit {
+export class VideoEditPanel {
   private dialogRef: MatDialogRef<VideoEditPanel, string[] | VideoMutationDetail> = inject(MatDialogRef);
   private data = inject<VideoEditPanelData>(MAT_DIALOG_DATA);
-  private formBuilder = inject(FormBuilder);
   private gqlService = inject(GqlService);
-  private validationService = inject(ValidationService);
   private toastService = inject(ToastService);
   private videoUpdateEventService = inject(VideoUpdateEventService);
   private destroyRef = inject(DestroyRef);
 
   mode: VideoEditPanelMode = this.data.mode;
   video = signal<EditableVideo | undefined>(this.data.video);
-  selectedTags?: string[] = this.data.selectedTags;
 
-  editForm = this.formBuilder.group({
-      name: [this.video()?.name ?? '', [Validators.required, this.validationService.nameValidator()]],
-      author: [this.video()?.author ?? '', [this.validationService.authorValidator()]],
-      loved: [this.video()?.loved ?? false],
-      introduction: [this.video()?.introduction ?? '', [this.validationService.introductionValidator()]],
-      tagInput: ['', [this.validationService.tagValidator()]],
-      modifySeries: [false],
-      seriesAction: ['set' as 'set' | 'clear'],
-      seriesName: [this.video()?.seriesName ?? '', [this.validationService.seriesNameValidator()]],
+  protected model = signal({
+    name: this.data.video?.name ?? '',
+    author: this.data.video?.author ?? '',
+    loved: this.data.video?.loved ?? false,
+    introduction: this.data.video?.introduction ?? '',
+    tags: this.data.mode === 'full'
+      ? (this.data.video?.tags.map(tag => tag.name) ?? [])
+      : [...(this.data.selectedTags ?? [])],
+    series: {
+      modify: false,
+      action: 'set',
+      name: this.data.video?.seriesName ?? '',
+      members: [],
+    } as SeriesEdit,
   });
 
-  tags = signal<string[]>([]);
-  isSaving = signal<boolean>(false);
+  editForm = form(
+    this.model,
+    path => {
+      apply(path.tags, tagListRule);
+      // Filter mode collects tags and nothing else; the other fields are not even rendered.
+      if (this.mode !== 'full') return;
+      required(path.name, { message: 'Title is required' });
+      maxLengthRule(path.name, environment.VALIDATION_RULES.NAME_MAX_LENGTH);
+      maxLengthRule(path.author, environment.VALIDATION_RULES.AUTHOR_MAX_LENGTH);
+      maxLengthRule(path.introduction, environment.VALIDATION_RULES.INTRODUCTION_MAX_LENGTH);
+      apply(path.series, seriesEditSchema);
+    },
+    { submission: { action: () => this.save() } },
+  );
 
-  seriesMembers = signal<BatchPanelVideoItem[]>([]);
-  /* 
-    Most recently confirmed series name: either the original name on check-in,
-    or the last autocomplete suggestion the user picked. Typing into the input
-    without picking a suggestion does not update this, so we can detect
-    "user typed something new" and reset the list to just the current video.
+  /*
+    Most recently confirmed series name: either the original name on check-in, or the last
+    autocomplete suggestion the user picked. Typing into the input without picking a
+    suggestion does not update this, so we can detect "user typed something new" and reset
+    the list to just the current video.
   */
   private committedSeriesName = signal<string | null>(null);
   isLoadingSeriesMembers = signal<boolean>(false);
 
-  modifySeries = toSignal(
-    this.editForm.controls.modifySeries.valueChanges.pipe(startWith(this.editForm.controls.modifySeries.value)),
-    { initialValue: false }
-  );
-
-  seriesAction = toSignal(
-    this.editForm.controls.seriesAction.valueChanges.pipe(startWith(this.editForm.controls.seriesAction.value)),
-    { initialValue: 'set' as 'set' | 'clear' }
-  );
-
   currentVideoId = computed(() => this.video()?.id ?? null);
 
-  authorSuggestions = this.mode === 'full'?
-    toSignal(
-      this.gqlService.getSuggestionsQuery(
-        this.editForm.controls.author.valueChanges,
-        SearchField.Author
-      ),
-      { initialValue: this.gqlService.initialSignalData<string[]>([]) }
-    )
+  authorSuggestions = this.mode === 'full'
+    ? toSignal(
+        this.gqlService.getSuggestionsQuery(
+          toObservable(computed(() => this.model().author)),
+          SearchField.Author
+        ),
+        { initialValue: this.gqlService.initialSignalData<string[]>([]) }
+      )
     : signal(this.gqlService.initialSignalData<string[]>([]));
-
-  tagSuggestions = toSignal(
-    this.gqlService.getSuggestionsQuery(
-      this.editForm.controls.tagInput.valueChanges.pipe(
-        startWith(this.editForm.controls.tagInput.value)
-      ),
-      SearchField.Tag
-    ),
-    { initialValue: this.gqlService.initialSignalData<string[]>([]) }
-  )
-
-  seriesSuggestions = this.mode === 'full' ?
-    toSignal(
-      this.editForm.controls.seriesName.valueChanges.pipe(
-        startWith(this.editForm.controls.seriesName.value),
-        debounceTime(300),
-        distinctUntilChanged(),
-        switchMap(value => this.gqlService.searchSeriesByPrefixQuery(value ?? '', 10))
-      ),
-      { initialValue: this.gqlService.initialSignalData<string[]>([]) }
-    )
-    : signal(this.gqlService.initialSignalData<string[]>([]));
-
-  tagsError = computed(() => {
-    const result = this.validationService.validateTagsArray(this.tags());
-    return result.valid ? null : result.error;
-  });
 
   isFullMode = computed(() => this.mode === 'full');
 
   saveButtonText = computed(() =>
-    this.mode === 'filter' ? 'Apply Filter' : (this.isSaving() ? 'Saving...' : 'Save')
+    this.mode === 'filter' ? 'Apply Filter' : (this.editForm().submitting() ? 'Saving...' : 'Save')
   );
 
-  ngOnInit() { this.initializeFormState(); }
+  constructor() {
+    effect(() => {
+      const typed = this.model().series.name;
+      const committed = this.committedSeriesName();
+      // Only a committed name can be departed from; a blank slate has nothing to reset.
+      if (committed === null) return;
+      if (typed !== committed) {
+        this.committedSeriesName.set(null);
+        this.setSeriesMembers([this.currentVideoAsItem()]);
+      }
+    });
+  }
 
-  private initializeFormState() {
-    if (this.mode === 'full' && this.video) {
-      this.editForm.patchValue({
-        name: this.video()?.name,
-        author: this.video()?.author,
-        loved: this.video()?.loved,
-        introduction: this.video()?.introduction,
-        seriesName: this.video()?.seriesName ?? '',
-      });
-      this.tags.set(this.video()?.tags.map(tag => tag.name) ?? []);
-    } else if (this.mode === 'filter' && this.selectedTags) {
-      this.tags.set([...this.selectedTags]);
-    }
+  private setSeriesMembers(members: BatchPanelVideoItem[]) {
+    this.model.update(current => ({ ...current, series: { ...current.series, members } }));
+  }
+
+  protected onSeriesMembersChange(members: BatchPanelVideoItem[]) {
+    this.setSeriesMembers(members);
   }
 
   onModifySeriesToggle(checked: boolean) {
     if (!checked) {
       // Revert any staged changes.
-      this.seriesMembers.set([]);
       this.committedSeriesName.set(null);
-      this.editForm.patchValue({
-        seriesAction: 'set',
-        seriesName: this.video()?.seriesName ?? '',
-      });
+      this.model.update(current => ({
+        ...current,
+        series: {
+          ...current.series,
+          action: 'set',
+          name: this.video()?.seriesName ?? '',
+          members: [],
+        },
+      }));
       return;
     }
 
@@ -184,24 +166,21 @@ export class VideoEditPanel implements OnInit {
       this.loadSeriesMembers(existingName);
     } else {
       this.committedSeriesName.set(null);
-      this.seriesMembers.set([this.currentVideoAsItem()]);
+      this.setSeriesMembers([this.currentVideoAsItem()]);
     }
   }
 
-  selectSeriesSuggestion(name: string) {
-    this.editForm.patchValue({ seriesName: name });
+  protected onSeriesSuggestionPicked(name: string) {
     this.committedSeriesName.set(name);
     this.loadSeriesMembers(name);
   }
 
-  onSeriesNameInput(value: string) {
-    const committed = this.committedSeriesName();
-    if (committed === null) return;
-    if (value !== committed) {
-      // User is typing a brand-new name; seed list with just the current video.
-      this.committedSeriesName.set(null);
-      this.seriesMembers.set([this.currentVideoAsItem()]);
-    }
+  protected toggleLoved() {
+    this.model.update(current => ({ ...current, loved: !current.loved }));
+  }
+
+  protected selectAuthorSuggestion(author: string) {
+    this.model.update(current => ({ ...current, author }));
   }
 
   private currentVideoAsItem(): BatchPanelVideoItem {
@@ -241,30 +220,24 @@ export class VideoEditPanel implements OnInit {
           if (!mapped.some(m => m.id === currentItem.id)) {
             mapped.push(currentItem);
           }
-          this.seriesMembers.set(mapped);
+          this.setSeriesMembers(mapped);
         },
         error: () => {
           this.isLoadingSeriesMembers.set(false);
-          this.seriesMembers.set([this.currentVideoAsItem()]);
+          this.setSeriesMembers([this.currentVideoAsItem()]);
         },
       });
   }
 
   private buildSeriesInput(): SeriesFieldInput | undefined {
-    const modify = this.editForm.value.modifySeries ?? false;
-    if (!modify) return undefined;
+    const series = this.model().series;
+    if (!series.modify) return undefined;
+    if (series.action === 'clear') return { clear: true };
 
-    const action = this.editForm.value.seriesAction ?? 'set';
-    if (action === 'clear') {
-      return { clear: true };
-    }
+    const name = series.name.trim();
+    if (!name) return { clear: true };
 
-    const name = (this.editForm.value.seriesName ?? '').trim();
-    if (!name) {
-      return { clear: true };
-    }
-
-    const orders: SeriesOrderEntryInput[] = this.seriesMembers().map((item, index) => ({
+    const orders: SeriesOrderEntryInput[] = series.members.map((item, index) => ({
       videoId: item.id,
       order: index + 1,
     }));
@@ -283,97 +256,53 @@ export class VideoEditPanel implements OnInit {
     return Array.from(ids);
   }
 
-  selectAuthorSuggestion(author: string) {
-    this.editForm.patchValue({ author });
-  }
-
-  toggleLoved() {
-    const currentLoved = this.editForm.get('loved')?.value;
-    this.editForm.patchValue({ loved: !currentLoved });
-  }
-
-  addTag(tagValue?: string) {
-    const value = tagValue || this.editForm.get('tagInput')?.value;
-
-    if (!value || value.trim() === '') {
-      return;
-    }
-
-    const trimmedTag = value.trim();
-
-    const tagValidation = this.validationService.validateTag(trimmedTag);
-    if (!tagValidation.valid) {
-      return;
-    }
-
-    const tagsArrayValidation = this.validationService.validateTagsArray([...this.tags(), trimmedTag]);
-    if (!tagsArrayValidation.valid) {
-      return;
-    }
-
-    if (this.tags().includes(trimmedTag)) {
-      this.editForm.patchValue({ tagInput: '' });
-      return;
-    }
-
-    this.tags.update(tags => [...tags, trimmedTag]);
-
-    this.editForm.patchValue({ tagInput: '' });
-  }
-
-  selectTagSuggestion(tag: string) {
-    this.addTag(tag);
-  }
-
-  removeTag(tag: string) {
-    this.tags.update(tags => tags.filter(t => t !== tag));
-  }
-
-  onTagInputEnter(event: Event) {
-    event.preventDefault();
-    this.addTag();
-  }
-
   handleSave() {
+    if (this.editForm().submitting()) return;
+    submit(this.editForm);
+  }
+
+  private async save(): Promise<null> {
+    const draft = this.model();
+
     if (this.mode === 'filter') {
-      this.dialogRef.close(this.tags());
+      this.dialogRef.close(draft.tags);
+      return null;
     }
-    else {
-      if (this.editForm.valid && !this.tagsError() && this.video()) {
-        const formValue = this.editForm.value;
-        const seriesInput = this.buildSeriesInput();
+    if (!this.video()) return null;
 
-        this.isSaving.set(true);
+    const seriesInput = this.buildSeriesInput();
 
+    try {
+      const result = await firstValueFrom(
         this.gqlService.updateVideoMetadataMutation(
           this.video()!.id,
-          formValue.loved ?? false,
-          this.tags(),
-          formValue.name ?? undefined,
-          formValue.introduction ?? undefined,
-          formValue.author ?? 'Unknown',
+          draft.loved,
+          draft.tags,
+          draft.name,
+          draft.introduction,
+          draft.author || 'Unknown',
           seriesInput,
-        )
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (result) => {
-            this.isSaving.set(false);
-            if (result.data?.success) {
-              this.videoUpdateEventService.emitUpdated(this.affectedVideoIds(seriesInput));
-              this.toastService.emitNewToast('Video information updated successfully.', ToastType.Success);
-              this.dialogRef.close(result.data);
-            } else {
-              // update failed, keep the dialog open for user to retry
-              this.toastService.emitNewToast('Failed to update video metadata.', ToastType.Error);
-            }
-          },
-          error: (err) => {
-            this.isSaving.set(false);
-            this.toastService.emitNewToast('Error updating video metadata: ' + err.message, ToastType.Error);
-          }
-        });
+        ).pipe(takeUntilDestroyed(this.destroyRef)),
+        { defaultValue: null },
+      );
+
+      // The dialog was destroyed before the mutation answered; nothing left to report to.
+      if (result === null) return null;
+
+      if (result.data?.success) {
+        this.videoUpdateEventService.emitUpdated(this.affectedVideoIds(seriesInput));
+        this.toastService.emitNewToast('Video information updated successfully.', ToastType.Success);
+        this.dialogRef.close(result.data);
+      } else {
+        // update failed, keep the dialog open for user to retry
+        this.toastService.emitNewToast('Failed to update video metadata.', ToastType.Error);
       }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.toastService.emitNewToast('Error updating video metadata: ' + message, ToastType.Error);
     }
+
+    return null;
   }
 
   handleCancel() {

@@ -1,6 +1,6 @@
 import { Component, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
+import { form, FormField, FormRoot, submit } from '@angular/forms/signals';
 import { MatButtonModule } from '@angular/material/button';
 import {
   MAT_DIALOG_DATA,
@@ -13,9 +13,10 @@ import {
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { firstValueFrom } from 'rxjs';
 import { GqlService } from '../../../services/GQL-service/GQL.service';
 import { ToastService } from '../../../services/toast-service/toast.service';
-import { ValidationService } from '../../../services/validation-service/validation.service';
+import { folderNameRule } from '../../../services/validation-service/validation.rules';
 import { NewFolderPanelData } from '../../models/panels.model';
 import { ToastType } from '../../models/toast.model';
 import { ToastDisplayer } from '../toast-displayer/toast-displayer';
@@ -23,7 +24,8 @@ import { ToastDisplayer } from '../toast-displayer/toast-displayer';
 @Component({
   selector: 'app-new-folder-panel',
   imports: [
-    ReactiveFormsModule,
+    FormField,
+    FormRoot,
     MatButtonModule,
     MatDialogActions,
     MatDialogClose,
@@ -40,61 +42,59 @@ import { ToastDisplayer } from '../toast-displayer/toast-displayer';
 export class NewFolderPanel {
   readonly dialogRef = inject(MatDialogRef<NewFolderPanel>);
   readonly data = inject<NewFolderPanelData>(MAT_DIALOG_DATA);
-  private fb = inject(FormBuilder);
   private gqlService = inject(GqlService);
   private toastService = inject(ToastService);
-  private validationService = inject(ValidationService);
   private destroyRef = inject(DestroyRef);
 
-  isSaving = signal<boolean>(false);
+  private model = signal({ name: '' });
 
-  folderForm = this.fb.group({
-    name: ['', [this.validationService.folderNameValidator()]]
-  });
+  /*
+    Submission lives in the form options rather than in a click handler so that `formRoot`
+    can drive it too — that is what keeps Enter submitting the dialog.
+  */
+  folderForm = form(
+    this.model,
+    path => folderNameRule(path.name),
+    { submission: { action: () => this.createDirectory() } },
+  );
 
-  get name() { return this.folderForm.get('name') as FormControl<string>; }
-
-  errorMessage(): string {
-    const errors = this.name.errors;
-    if (!errors) return '';
-    if (errors['required']) return 'A folder name is required';
-    if (errors['folderSeparator']) return 'A folder name cannot contain "/" or "\\"';
-    if (errors['folderRelativeReference']) return 'That is not a folder name';
-    if (errors['maxLength']) return `Maximum length is ${errors['maxLength'].max} characters`;
-    return 'Invalid folder name';
+  submitForm() {
+    if (this.folderForm().submitting()) return;
+    submit(this.folderForm);
   }
 
-  createFolder() {
-    if (this.folderForm.invalid || this.isSaving()) return;
+  private async createDirectory(): Promise<null> {
+    const name = this.model().name.trim();
 
-    const name = (this.folderForm.value.name ?? '').trim();
-    this.isSaving.set(true);
+    try {
+      const result = await firstValueFrom(
+        this.gqlService
+          .createDirectoryMutation(this.data.parentPath || undefined, name)
+          .pipe(takeUntilDestroyed(this.destroyRef)),
+        { defaultValue: null },
+      );
 
-    this.gqlService.createDirectoryMutation(this.data.parentPath || undefined, name)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: result => {
-          this.isSaving.set(false);
-          if (result.error) {
-            // GqlService has already raised the toast. The dialog stays open: a name
-            // clash is the likeliest rejection, and retyping is the whole fix.
-            return;
-          }
-          if (result.data?.success) {
-            this.toastService.emitNewToast(
-              `Folder "${result.data.name}" created.`, ToastType.Success
-            );
-            this.dialogRef.close(true);
-          } else {
-            this.toastService.emitNewToast('Failed to create the folder.', ToastType.Error);
-          }
-        },
-        error: err => {
-          this.isSaving.set(false);
-          this.toastService.emitNewToast(
-            `Failed to create the folder: ${err.message || err}`, ToastType.Error
-          );
-        }
-      });
+      // The dialog was destroyed before the mutation answered; nothing left to report to.
+      if (result === null) return null;
+
+      if (result.error) {
+        // GqlService has already raised the toast. The dialog stays open: a name
+        // clash is the likeliest rejection, and retyping is the whole fix.
+        return null;
+      }
+      if (result.data?.success) {
+        this.toastService.emitNewToast(
+          `Folder "${result.data.name}" created.`, ToastType.Success
+        );
+        this.dialogRef.close(true);
+      } else {
+        this.toastService.emitNewToast('Failed to create the folder.', ToastType.Error);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.toastService.emitNewToast(`Failed to create the folder: ${message}`, ToastType.Error);
+    }
+
+    return null;
   }
 }
