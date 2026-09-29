@@ -147,6 +147,7 @@ def get_batch_operation_service(
     thumbnail_service = Depends(get_thumbnail_service),
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
+    series_service = Depends(get_series_service),
 ):
     return BatchOperationService(
         dir_metadata_service=dir_metadata_service,
@@ -154,6 +155,7 @@ def get_batch_operation_service(
         thumbnail_service=thumbnail_service,
         resource_handler_service=resource_handler_service,
         ffmpeg_service=ffmpeg_service,
+        series_service=series_service,
     )
 
 def get_catalog_service(
@@ -163,6 +165,7 @@ def get_catalog_service(
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
     path_locks = Depends(get_path_lock_registry),
+    series_service = Depends(get_series_service),
 ):
     return CatalogService(
         settings=settings,
@@ -171,6 +174,7 @@ def get_catalog_service(
         resource_handler_service=resource_handler_service,
         ffmpeg_service=ffmpeg_service,
         path_locks=path_locks,
+        series_service=series_service,
     )
 
 def get_migration_service(

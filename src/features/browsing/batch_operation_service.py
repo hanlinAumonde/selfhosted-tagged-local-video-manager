@@ -9,6 +9,7 @@ from pymongo.errors import BulkWriteError
 from src.features.catalog.video import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
+from src.features.catalog.series_service import SeriesPlacement, SeriesService
 from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,
     TagsOperationMappingInputModel,
@@ -55,8 +56,10 @@ class BatchOperationService:
         thumbnail_service: ThumbnailService,
         resource_handler_service: ResourceHandlerService,
         ffmpeg_service: FFmpegService,
+        series_service: SeriesService,
     ):
         self.dirMetadataService = dir_metadata_service
+        self.seriesService = series_service
         self.tagOperationService = tag_operation_service
         self.thumbnailService = thumbnail_service
         self.resourceHandlerService = resource_handler_service
@@ -336,10 +339,14 @@ class BatchOperationService:
         no_need_update_flag = False
         new_entries = []
 
-        # Normalize seriesOperation into a {videoId: order} map for id-based lookup.
-        series_orders_map: dict[str, int] = {}
-        if seriesOperation is not None and not seriesOperation.clear:
-            series_orders_map = {entry.videoId: entry.order for entry in seriesOperation.orders}
+        # The request carries a relative sequence over the selection; the planner turns it
+        # into an end state for every video the move affects, selected or not.
+        series_plan: dict[str, SeriesPlacement] = {}
+        if seriesOperation is not None and videoIDs:
+            series_plan = {
+                p.video_id: p
+                for p in await self._plan_series(seriesOperation, videoIDs)
+            }
 
         try:
             if videoIDs is not None:
@@ -355,7 +362,10 @@ class BatchOperationService:
                     operations=operations,
                     no_need_update_flag=no_need_update_flag,
                     seriesOperation=seriesOperation,
-                    seriesOrdersMap=series_orders_map,
+                    seriesPlan=series_plan,
+                )
+                operations.extend(
+                    await self._series_bystander_operations(series_plan, videoIDs)
                 )
                 yield self.constructBatchOperationStatus(
                     status=f"Prepared update operations for {len(video_models)} existing videos based on IDs"
@@ -380,7 +390,7 @@ class BatchOperationService:
                     operations=operations,
                     no_need_update_flag=no_need_update_flag,
                     seriesOperation=None,
-                    seriesOrdersMap={},
+                    seriesPlan={},
                 )
 
                 new_entries = [
@@ -445,6 +455,77 @@ class BatchOperationService:
             logger.exception(f"Error during batch update: {e}")
             raise DatabaseOperationError("batch_update", "general_failure")
 
+    async def _plan_series(
+        self, seriesOperation: SeriesOperationInputModel, videoIDs: list[str]
+    ) -> list[SeriesPlacement]:
+        """
+        Turn a series request into an end state for every video it affects.
+
+        ``orders`` is read as a sequence rather than as final numbers: the panel that
+        produced it only ever saw the selected videos, so its 1..n counts from the first
+        selected row and says nothing about the members it never listed.
+
+        :param seriesOperation: The requested series change.
+        :type seriesOperation: SeriesOperationInputModel
+        :param videoIDs: The selected video IDs.
+        :type videoIDs: list[str]
+        :return: The planned end state of every affected video.
+        :rtype: list[SeriesPlacement]
+        """
+        if seriesOperation.clear:
+            return await self.seriesService.plan_clear([str(vid) for vid in videoIDs])
+
+        ordered = [
+            entry.videoId
+            for entry in sorted(seriesOperation.orders, key=lambda e: e.order)
+        ]
+        return await self.seriesService.plan_assignment(seriesOperation.name, ordered)
+
+    @staticmethod
+    async def _series_bystander_operations(
+        seriesPlan: dict[str, "SeriesPlacement"], videoIDs: list[str]
+    ) -> list[UpdateOne]:
+        """
+        Build the writes for videos the plan moves that the caller never selected.
+
+        A re-order reaches past the selection in both directions — the target series holds
+        members nobody picked, and the series the selection left has to close the gaps it
+        opened. Their stored values are re-read here so that only the ones that actually
+        move are written: permuting a selection inside an already-contiguous series must
+        not rewrite the rest of the series.
+
+        :param seriesPlan: The planned end state per video ID.
+        :type seriesPlan: dict[str, SeriesPlacement]
+        :param videoIDs: The selected video IDs, which are written along with the rest of their edits.
+        :type videoIDs: list[str]
+        :return: One update per bystander whose membership or order changes.
+        :rtype: list[UpdateOne]
+        """
+        selected = {str(vid) for vid in videoIDs}
+        bystander_ids = [vid for vid in seriesPlan if vid not in selected]
+        if not bystander_ids:
+            return []
+
+        stored = await VideoModel.find(
+            {"_id": {"$in": [ObjectId(vid) for vid in bystander_ids]}}
+        ).to_list()
+
+        operations = []
+        for video in stored:
+            placement = seriesPlan[str(video.id)]
+            if (video.seriesName, video.seriesOrder) == (placement.series_name, placement.order):
+                continue
+            operations.append(
+                UpdateOne(
+                    {"_id": video.id},
+                    {"$set": {
+                        "seriesName": placement.series_name,
+                        "seriesOrder": placement.order,
+                    }},
+                )
+            )
+        return operations
+
     async def _update_existing_videos_operations(self,
                                                  video_models: list[VideoModel],
                                                  findById: bool,
@@ -454,7 +535,7 @@ class BatchOperationService:
                                                  no_need_update_flag: bool,
                                                  update_tags: dict[str, tuple[int, bool]],
                                                  seriesOperation: SeriesOperationInputModel | None,
-                                                 seriesOrdersMap: dict[str, int]):
+                                                 seriesPlan: dict[str, SeriesPlacement]):
         """
         Helper function to prepare update operations for existing videos based on provided author, tagsOperation, and seriesOperation.
         
@@ -474,8 +555,8 @@ class BatchOperationService:
         :type update_tags: dict[str, tuple[int, bool]]
         :param seriesOperation: The series operation to apply to the videos (optional, only applicable when findById is True).
         :type seriesOperation: SeriesOperationInputModel | None
-        :param seriesOrdersMap: A mapping of video ID to target series order (only applicable when seriesOperation is provided and clear is False).
-        :type seriesOrdersMap: dict[str, int]
+        :param seriesPlan: The planned end state per video ID (only applicable when seriesOperation is provided).
+        :type seriesPlan: dict[str, SeriesPlacement]
         :return: Updated no_need_update_flag indicating whether any updates are needed.
         :rtype: bool
         """
@@ -513,17 +594,12 @@ class BatchOperationService:
                     update_query["duration"] = duration
 
             if seriesOperation is not None:
-                if seriesOperation.clear:
-                    if video_model.seriesName is not None:
-                        update_query["seriesName"] = None
-                    if video_model.seriesOrder is not None:
-                        update_query["seriesOrder"] = None
-                else:
-                    target_order = seriesOrdersMap.get(str(video_model.id))
-                    if video_model.seriesName != seriesOperation.name:
-                        update_query["seriesName"] = seriesOperation.name
-                    if video_model.seriesOrder != target_order:
-                        update_query["seriesOrder"] = target_order
+                placement = seriesPlan.get(str(video_model.id))
+                if placement is not None:
+                    if video_model.seriesName != placement.series_name:
+                        update_query["seriesName"] = placement.series_name
+                    if video_model.seriesOrder != placement.order:
+                        update_query["seriesOrder"] = placement.order
 
             if update_query:
                 operations.append(UpdateOne(filter_query, {"$set": update_query}))

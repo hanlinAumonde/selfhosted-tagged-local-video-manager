@@ -134,6 +134,10 @@
             }
           </div>
 
+          @if (currentSeriesSummary(); as summary) {
+            <p class="text-xs text-gray-600 dark:text-gray-400 mb-3">{{ summary }}</p>
+          }
+
           @if (model().series.modify) {
           <mat-radio-group [formField]="batchForm.series.action" class="flex gap-6 mb-3">
             <mat-radio-button value="set">
@@ -156,7 +160,12 @@
 
             @if (model().series.members.length > 0) {
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                Reorder the selected videos. Positions will be used as the series order.
+                @if (isReorderingSharedSeries()) {
+                  Reorder the selected videos. Only their positions relative to each other
+                  change — the rest of the series stays where it is.
+                } @else {
+                  Reorder the selected videos. They are appended to the series in this order.
+                }
               </p>
               <app-series-reorder-list
                 [items]="model().series.members"

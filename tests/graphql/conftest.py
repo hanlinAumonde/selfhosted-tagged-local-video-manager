@@ -234,6 +234,7 @@ def real_catalog_service(
         resource_handler_service=mock_resource_handler_service,
         ffmpeg_service=mock_ffmpeg_service,
         path_locks=real_path_lock_registry,
+        series_service=SeriesService(),
     )
 
 
