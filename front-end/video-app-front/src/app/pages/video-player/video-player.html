@@ -9,116 +9,117 @@
       <p class="text-red-500">Failed to load video</p>
     </div>
   } @else {
-    <div class="flex flex-col lg:flex-row gap-6 items-start">
-      <!-- Left column: player + info. When there's no series, center it and cap its width. -->
-      <div [class]="video().data?.seriesName ? 'flex-1 min-w-0 w-full' : 'w-full max-w-4xl mx-auto'">
-        <!-- Video Player Section -->
-        <div class="w-full mb-6">
-          @defer(on viewport){
-            <app-video-player-host
-              [src]="videoStreamUrl()"
-              (played)="recordView()" />
-          }@placeholder {
-            <div class="flex justify-center items-center h-96">
-              <mat-progress-spinner mode="indeterminate" diameter="48"></mat-progress-spinner>
-            </div>
-          }
-        </div>
-
-        <!-- Video Info Section -->
-        <div class="space-y-4 py-4">
-          <div class="flex justify-between items-start flex-wrap gap-4">
-            <h1 class="flex-1 text-2xl font-bold dark:text-gray-100">{{ video().data?.name }}</h1>
-            <div class="flex gap-4 flex-wrap">
-              <button id="love-icon" mat-icon-button (click)="onLovedClick()" [class.text-pink-500]="video().data?.loved">
-                <mat-icon>{{ video().data?.loved ? 'favorite' : 'favorite_border' }}</mat-icon>
-              </button>
-              <button mat-icon-button (click)="onEditClick()">
-                <mat-icon color="primary" fontIcon="build"></mat-icon>
-              </button>
-            </div>
+    <div class="flex flex-col gap-6">
+      <!-- Video Player Section: spans the container, with everything else below it. -->
+      <div class="w-full">
+        @defer(on viewport){
+          <app-video-player-host
+            [src]="videoStreamUrl()"
+            (played)="recordView()" />
+        }@placeholder {
+          <div class="flex justify-center items-center h-96">
+            <mat-progress-spinner mode="indeterminate" diameter="48"></mat-progress-spinner>
           </div>
-
-          <!-- Creator -->
-          <div class="flex items-center gap-2">
-            <span class="text-pink-600 font-semibold">Creator:</span>
-            <a
-              [routerLink]="[searchPageApi]"
-              [queryParams]="{ currentPageNumber: 1 }"
-              [state]="searchPageState(video().data?.author ?? '', 'author')"
-              (click)="onAuthorClick(video().data?.author ?? '')"
-              target="_blank"
-            >
-              <span
-                class="px-3 py-1 bg-pink-100 dark:bg-pink-500/20 dark:text-pink-300 rounded-full cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-500/30 transition-colors"
-              >
-              {{ video().data?.author ?? 'Unknown' }}
-            </span>
-            </a>
-          </div>
-
-          <!-- Series info (when assigned) -->
-          @if (video().data?.seriesName) {
-            <div class="flex items-center gap-2">
-              <span class="text-blue-600 font-semibold">Series:</span>
-              <span class="px-3 py-1 bg-blue-100 dark:bg-blue-500/20 dark:text-blue-300 rounded-full">
-                {{ video().data?.seriesName }}
-                @if (video().data?.seriesOrder != null) {
-                  <span class="ml-1 text-xs opacity-70">#{{ video().data?.seriesOrder }}</span>
-                }
-              </span>
-            </div>
-          }
-
-          <!-- Introduction -->
-          @if (video().data?.introduction) {
-            <div class="space-y-2">
-              <span class="text-gray-600 dark:text-gray-400 font-semibold">Introduction:</span>
-              <div class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                <p class="text-gray-700 dark:text-gray-300">{{ video().data?.introduction }}</p>
-              </div>
-            </div>
-          }
-
-          <!-- Views -->
-          <div class="flex items-center gap-2">
-            <span class="text-orange-600 font-semibold">Views:</span>
-            <span class="px-3 py-1 bg-orange-200 dark:bg-orange-500/20 dark:text-orange-300 rounded-full">
-              {{ formattedViews() }}
-            </span>
-          </div>
-
-          <!-- Tags -->
-          @if (video().data?.tags && video().data!.tags.length > 0) {
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-purple-600 font-semibold">Tags:</span>
-              @for (tag of video().data?.tags; track tag.name) {
-                <a
-                  [routerLink]="[searchPageApi]"
-                  [queryParams]="{ currentPageNumber: 1 }"
-                  [state]="searchPageState(tag.name, 'tags')"
-                  (click)="onTagClick(tag.name)"
-                  target="_blank"
-                >
-                  <span
-                    class="px-3 py-1 bg-purple-200 dark:bg-purple-500/20 dark:text-purple-300 rounded-full cursor-pointer hover:bg-purple-300 dark:hover:bg-purple-500/30 transition-colors"
-                    >
-                    {{ tag.name }}
-                  </span>
-                </a>
-              }
-            </div>
-          }
-        </div>
+        }
       </div>
 
-      @if (video().data?.seriesName) {
-        <aside class="w-full lg:w-96 shrink-0 flex flex-col gap-4">
-          <app-series-panel
-            [seriesName]="video().data?.seriesName"
-            [currentVideoId]="video().data?.id" />
-        </aside>
-      }
+      <!-- Lower half: the details and the series share one row under the player. -->
+      <div class="flex flex-col lg:flex-row gap-6 items-start">
+        <div class="flex-1 min-w-0 w-full">
+          <div class="space-y-4">
+            <div class="flex justify-between items-start flex-wrap gap-4">
+              <h1 class="flex-1 text-2xl font-bold dark:text-gray-100">{{ video().data?.name }}</h1>
+              <div class="flex gap-4 flex-wrap">
+                <button id="love-icon" mat-icon-button (click)="onLovedClick()" [class.text-pink-500]="video().data?.loved">
+                  <mat-icon>{{ video().data?.loved ? 'favorite' : 'favorite_border' }}</mat-icon>
+                </button>
+                <button mat-icon-button (click)="onEditClick()">
+                  <mat-icon color="primary" fontIcon="build"></mat-icon>
+                </button>
+              </div>
+            </div>
+
+            <!-- Creator -->
+            <div class="flex items-center gap-2">
+              <span class="text-pink-600 font-semibold">Creator:</span>
+              <a
+                [routerLink]="[searchPageApi]"
+                [queryParams]="{ currentPageNumber: 1 }"
+                [state]="searchPageState(video().data?.author ?? '', 'author')"
+                (click)="onAuthorClick(video().data?.author ?? '')"
+                target="_blank"
+              >
+                <span
+                  class="px-3 py-1 bg-pink-100 dark:bg-pink-500/20 dark:text-pink-300 rounded-full cursor-pointer hover:bg-pink-200 dark:hover:bg-pink-500/30 transition-colors"
+                >
+                {{ video().data?.author ?? 'Unknown' }}
+              </span>
+              </a>
+            </div>
+
+            <!-- Series info (when assigned) -->
+            @if (video().data?.seriesName) {
+              <div class="flex items-center gap-2">
+                <span class="text-blue-600 font-semibold">Series:</span>
+                <span class="px-3 py-1 bg-blue-100 dark:bg-blue-500/20 dark:text-blue-300 rounded-full">
+                  {{ video().data?.seriesName }}
+                  @if (video().data?.seriesOrder != null) {
+                    <span class="ml-1 text-xs opacity-70">#{{ video().data?.seriesOrder }}</span>
+                  }
+                </span>
+              </div>
+            }
+
+            <!-- Introduction -->
+            @if (video().data?.introduction) {
+              <div class="space-y-2">
+                <span class="text-gray-600 dark:text-gray-400 font-semibold">Introduction:</span>
+                <div class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                  <p class="text-gray-700 dark:text-gray-300">{{ video().data?.introduction }}</p>
+                </div>
+              </div>
+            }
+
+            <!-- Views -->
+            <div class="flex items-center gap-2">
+              <span class="text-orange-600 font-semibold">Views:</span>
+              <span class="px-3 py-1 bg-orange-200 dark:bg-orange-500/20 dark:text-orange-300 rounded-full">
+                {{ formattedViews() }}
+              </span>
+            </div>
+
+            <!-- Tags -->
+            @if (video().data?.tags && video().data!.tags.length > 0) {
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-purple-600 font-semibold">Tags:</span>
+                @for (tag of video().data?.tags; track tag.name) {
+                  <a
+                    [routerLink]="[searchPageApi]"
+                    [queryParams]="{ currentPageNumber: 1 }"
+                    [state]="searchPageState(tag.name, 'tags')"
+                    (click)="onTagClick(tag.name)"
+                    target="_blank"
+                  >
+                    <span
+                      class="px-3 py-1 bg-purple-200 dark:bg-purple-500/20 dark:text-purple-300 rounded-full cursor-pointer hover:bg-purple-300 dark:hover:bg-purple-500/30 transition-colors"
+                      >
+                      {{ tag.name }}
+                    </span>
+                  </a>
+                }
+              </div>
+            }
+          </div>
+        </div>
+
+        @if (video().data?.seriesName) {
+          <aside class="w-full lg:w-96 shrink-0 flex flex-col gap-4">
+            <app-series-panel
+              [seriesName]="video().data?.seriesName"
+              [currentVideoId]="video().data?.id" />
+          </aside>
+        }
+      </div>
     </div>
   }
 </div>
