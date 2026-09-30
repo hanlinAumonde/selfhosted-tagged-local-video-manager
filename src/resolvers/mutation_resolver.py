@@ -11,6 +11,7 @@ from src.schema.types.fileBrowse_type import (
 from src.schema.types.video_type import UpdateVideoMetadataInput, Video
 from src.features.browsing.browse_file_service import BrowseFileService
 from src.features.catalog.catalog_service import CatalogService
+from src.features.catalog.series_service import SeriesService
 from src.platform.storage.absolute_path import AbsolutePath
 
 logger = get_logger("mutation_resolver")
@@ -35,7 +36,7 @@ async def resolve_update_video_metadata(input: UpdateVideoMetadataInput, info: s
 
     catalogService: CatalogService = get_context_value(info, ContextEnum.CATALOG_SERVICE)
     video_model = await catalogService.update_metadata(validated_input)
-    return VideoMutationResult(success=True, video=await Video.from_mongoDB(video_model))
+    return VideoMutationResult(success=True, video=await _to_video(video_model, info))
 
 
 async def resolve_record_video_view(videoId: strawberry.ID, info: strawberry.Info) -> VideoMutationResult:
@@ -51,7 +52,7 @@ async def resolve_record_video_view(videoId: strawberry.ID, info: strawberry.Inf
     """
     catalogService: CatalogService = get_context_value(info, ContextEnum.CATALOG_SERVICE)
     video_model = await catalogService.record_view(str(videoId))
-    return VideoMutationResult(success=True, video=await Video.from_mongoDB(video_model))
+    return VideoMutationResult(success=True, video=await _to_video(video_model, info))
 
 
 async def resolve_delete_video(videoId: strawberry.ID, info: strawberry.Info) -> VideoMutationResult:
@@ -97,3 +98,9 @@ async def resolve_create_directory(input: CreateDirectoryInput, info: strawberry
         validated_input.name
     )
     return DirectoryMutationResult(success=True, name=validated_input.name, path=db_path)
+
+
+async def _to_video(video_model, info: strawberry.Info) -> Video:
+    seriesService: SeriesService = get_context_value(info, ContextEnum.SERIES_SERVICE)
+    positions = await seriesService.positions_of([video_model])
+    return await Video.from_mongoDB(video_model, series=positions.get(str(video_model.id)))

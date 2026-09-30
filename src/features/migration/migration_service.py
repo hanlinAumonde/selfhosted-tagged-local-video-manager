@@ -13,6 +13,7 @@ from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.catalog.series_service import SeriesService
 from src.features.catalog.video import VideoModel
 from src.errors import _MigrationCancelled, InputValidationError
 from src.logger import get_logger
@@ -46,11 +47,13 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         self,
         resource_handler_service: ResourceHandlerService,
         dir_metadata_service: DirMetadataService,
+        series_service: SeriesService,
         progress_flush_interval: float = 3.0,
     ):
         super().__init__(progress_flush_interval=progress_flush_interval)
         self.resourceHandlerService = resource_handler_service
         self.dirMetadataService = dir_metadata_service
+        self.seriesService = series_service
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -621,6 +624,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             conflicting = await VideoModel.find_one({"path": target_path})
             if conflicting is not None and conflicting.id != video.id:
                 await conflicting.delete()
+                await self.seriesService.detach([str(conflicting.id)])
 
         video.path = target_path
         video.category = task.target_category

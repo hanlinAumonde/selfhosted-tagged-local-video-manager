@@ -61,6 +61,7 @@ def migration_path_locks(
         MigrationService(
             resource_handler_service=local_resource_handler_service,
             dir_metadata_service=dir_meta_svc,
+            series_service=SeriesService(),
         ),
     )
     return registry

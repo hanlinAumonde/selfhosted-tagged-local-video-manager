@@ -3,10 +3,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from bson import ObjectId
-from pymongo import UpdateOne
-from pymongo.errors import BulkWriteError
 
 from src.config import Settings
+from src.features.catalog.series import SeriesModel
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.video import VideoModel
 from src.features.catalog.video_tag import VideoTagModel
@@ -396,48 +395,32 @@ class CatalogService:
 
         video.tags = validated_input.tags
 
-        # series: None = no change; clear=True = wipe this video only;
-        # otherwise (name + orders) = rewrite the whole series ordering
-        series_bulk_ops: list[UpdateOne] = []
-        if validated_input.series is not None:
-            if validated_input.series.clear:
-                placements = await self.seriesService.plan_clear([str(video.id)])
-            else:
-                ordered_ids = self._validated_series_sequence(
-                    current_video_id=str(video.id),
-                    orders=validated_input.series.orders
-                )
-                await self._assert_orders_stay_within_the_series(
-                    current_video_id=str(video.id),
-                    target_series_name=validated_input.series.name,
-                    ordered_ids=ordered_ids,
-                )
-                placements = await self.seriesService.plan_assignment(
-                    validated_input.series.name, ordered_ids
-                )
-
-            for placement in placements:
-                if placement.video_id == str(video.id):
-                    # Reflect the change on the in-memory model so the returned video
-                    # shows it without a reload; the caller saves it below.
-                    video.seriesName = placement.series_name
-                    video.seriesOrder = placement.order
-                else:
-                    series_bulk_ops.append(UpdateOne(
-                        {"_id": ObjectId(placement.video_id)},
-                        {"$set": {
-                            "seriesName": placement.series_name,
-                            "seriesOrder": placement.order,
-                        }},
-                    ))
+        # series: None = no change; clear=True = take this video out of its series;
+        # otherwise (name + orders) = place it among the members the panel listed
+        ordered_ids: list[str] | None = None
+        if validated_input.series is not None and not validated_input.series.clear:
+            ordered_ids = self._validated_series_sequence(
+                current_video_id=str(video.id),
+                orders=validated_input.series.orders
+            )
+            await self._assert_orders_stay_within_the_series(
+                current_video_id=str(video.id),
+                target_series_name=validated_input.series.name,
+                ordered_ids=ordered_ids,
+            )
 
         try:
+            if validated_input.series is not None:
+                if validated_input.series.clear:
+                    change = await self.seriesService.clear([str(video.id)])
+                else:
+                    change = await self.seriesService.assign(
+                        validated_input.series.name, ordered_ids
+                    )
+                # save() writes the whole document, so the in-memory back-reference must
+                # match what the series write just stored or it would be put back.
+                video.seriesId = change.series_id
             await video.save()
-            if series_bulk_ops:
-                await VideoModel.get_pymongo_collection().bulk_write(series_bulk_ops)
-        except BulkWriteError as bwe:
-            logger.exception(f"Bulk write error during series rewrite: {bwe.details}")
-            raise DatabaseOperationError("update_video_metadata", "series_bulk_write_failure")
         except Exception as e:
             logger.exception(f"Database operation error during update video metadata: {e}")
             raise DatabaseOperationError(
@@ -542,9 +525,11 @@ class CatalogService:
                 field="series.orders", issue=f"videoIds not found: {missing}"
             )
 
+        target = await SeriesModel.find_one({"name": target_series_name})
+        target_id = target.id if target is not None else None
         foreign = [
             vid for vid, m in existing_by_id.items()
-            if m.seriesName != target_series_name
+            if target_id is None or m.seriesId != target_id
         ]
         if foreign:
             raise InputValidationError(
@@ -606,6 +591,7 @@ class CatalogService:
 
         try:
             await video.delete()
+            await self.seriesService.detach([video_id])
             await self.tagOperationService.update_tag_counts(
                 update_tags={tag: (1, False) for tag in old_tags}
             )

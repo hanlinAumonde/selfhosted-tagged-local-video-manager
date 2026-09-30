@@ -213,6 +213,7 @@ def real_path_lock_registry(
         MigrationService(
             resource_handler_service=mock_resource_handler_service,
             dir_metadata_service=mock_dir_metadata_service,
+            series_service=SeriesService(),
         ),
     )
     return registry

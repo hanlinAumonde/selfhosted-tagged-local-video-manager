@@ -154,6 +154,7 @@ def real_path_lock_registry(
         MigrationService(
             resource_handler_service=real_resource_handler_service,
             dir_metadata_service=real_dir_metadata_service,
+            series_service=SeriesService(),
         ),
     )
     return registry

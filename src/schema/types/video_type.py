@@ -1,6 +1,7 @@
 from typing import Optional
 import strawberry
 
+from src.features.catalog.series_service import SeriesPlacement
 from src.features.catalog.video import VideoModel
 from src.features.catalog.video_tag import VideoTagModel
 from src.schema.types.pydantic_types.batch_operation_type import SeriesOrderEntryInputModel
@@ -51,6 +52,7 @@ class Video:
         getTagsCount: bool = False,
         isLocked: bool = False,
         relativePath: Optional[str] = None,
+        series: Optional[SeriesPlacement] = None,
     ) -> "Video":
         """
         Convert a VideoModel instance from MongoDB to a Video GraphQL type.
@@ -66,6 +68,10 @@ class Video:
         :param relativePath: The sub-directory this row was found in, relative to the
             directory that was asked about. Only a search has one.
         :type relativePath: Optional[str]
+        :param series: Where the video sits in its series. Passed in for the same reason
+            as ``isLocked``: the database stores only a ``seriesId``, and a list of videos
+            should resolve all their positions with one lookup — see ``positions_of``.
+        :type series: Optional[SeriesPlacement]
         :return: The GraphQL representation.
         :rtype: Video
         """
@@ -94,8 +100,8 @@ class Video:
             ],
             thumbnail=videoModel.thumbnail,
             duration=videoModel.duration or 0.0,
-            seriesName=videoModel.seriesName,
-            seriesOrder=videoModel.seriesOrder,
+            seriesName=series.series_name if series else None,
+            seriesOrder=series.order if series else None,
             isLocked=isLocked,
             relativePath=relativePath,
         )

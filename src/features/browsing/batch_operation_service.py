@@ -9,7 +9,7 @@ from pymongo.errors import BulkWriteError
 from src.features.catalog.video import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
-from src.features.catalog.series_service import SeriesPlacement, SeriesService
+from src.features.catalog.series_service import SeriesChange, SeriesService
 from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,
     TagsOperationMappingInputModel,
@@ -339,15 +339,6 @@ class BatchOperationService:
         no_need_update_flag = False
         new_entries = []
 
-        # The request carries a relative sequence over the selection; the planner turns it
-        # into an end state for every video the move affects, selected or not.
-        series_plan: dict[str, SeriesPlacement] = {}
-        if seriesOperation is not None and videoIDs:
-            series_plan = {
-                p.video_id: p
-                for p in await self._plan_series(seriesOperation, videoIDs)
-            }
-
         try:
             if videoIDs is not None:
                 video_models = await VideoModel.find_many(
@@ -361,11 +352,6 @@ class BatchOperationService:
                     update_tags=update_tags,
                     operations=operations,
                     no_need_update_flag=no_need_update_flag,
-                    seriesOperation=seriesOperation,
-                    seriesPlan=series_plan,
-                )
-                operations.extend(
-                    await self._series_bystander_operations(series_plan, videoIDs)
                 )
                 yield self.constructBatchOperationStatus(
                     status=f"Prepared update operations for {len(video_models)} existing videos based on IDs"
@@ -389,8 +375,6 @@ class BatchOperationService:
                     update_tags=update_tags,
                     operations=operations,
                     no_need_update_flag=no_need_update_flag,
-                    seriesOperation=None,
-                    seriesPlan={},
                 )
 
                 new_entries = [
@@ -416,13 +400,22 @@ class BatchOperationService:
                         status=f"Prepared update operations for {len(video_models)} existing videos and {len(new_entries)} new videos based on paths"
                     )
 
-            if operations:
-                result = await VideoModel.get_pymongo_collection().bulk_write(operations)
-                successful_updates = result.modified_count + result.upserted_count
+            # The order lives on the series document, so a pure reorder writes no video
+            # document; that one series write is counted alongside the video writes.
+            series_changed = False
+            if seriesOperation is not None and videoIDs:
+                series_changed = (await self._apply_series(seriesOperation, videoIDs)).changed
+            total_updates = len(operations) + int(series_changed)
 
-                yield self.constructBatchOperationStatus(
-                    status=f"Executed batch update operations: {result.modified_count} modified, {result.upserted_count} upserted"
-                )
+            if total_updates:
+                if operations:
+                    result = await VideoModel.get_pymongo_collection().bulk_write(operations)
+                    successful_updates = result.modified_count + result.upserted_count
+
+                    yield self.constructBatchOperationStatus(
+                        status=f"Executed batch update operations: {result.modified_count} modified, {result.upserted_count} upserted"
+                    )
+                successful_updates += int(series_changed)
 
                 await self.tagOperationService.update_tag_counts(update_tags=update_tags)
 
@@ -437,10 +430,10 @@ class BatchOperationService:
                     await self.dirMetadataService.batch_update_metadata_forward(category, new_dir_db_paths)
 
                 yield self.constructBatchOperationStatus(
-                    resultType=BatchResultType.Success if successful_updates == len(operations) else \
+                    resultType=BatchResultType.Success if successful_updates == total_updates else \
                             BatchResultType.PartialSuccess if successful_updates > 0 else \
                             BatchResultType.Failure,
-                    message=f"{successful_updates} out of {len(operations)} updates succeeded" if successful_updates > 0 else None
+                    message=f"{successful_updates} out of {total_updates} updates succeeded" if successful_updates > 0 else None
                 )
             elif no_need_update_flag:
                 yield self.constructBatchOperationStatus(
@@ -455,13 +448,13 @@ class BatchOperationService:
             logger.exception(f"Error during batch update: {e}")
             raise DatabaseOperationError("batch_update", "general_failure")
 
-    async def _plan_series(
+    async def _apply_series(
         self, seriesOperation: SeriesOperationInputModel, videoIDs: list[str]
-    ) -> list[SeriesPlacement]:
+    ) -> SeriesChange:
         """
-        Turn a series request into an end state for every video it affects.
+        Carry out a series request over the selection.
 
-        ``orders`` is read as a sequence rather than as final numbers: the panel that
+        ``orders`` is read as a sequence rather than as final positions: the panel that
         produced it only ever saw the selected videos, so its 1..n counts from the first
         selected row and says nothing about the members it never listed.
 
@@ -469,62 +462,17 @@ class BatchOperationService:
         :type seriesOperation: SeriesOperationInputModel
         :param videoIDs: The selected video IDs.
         :type videoIDs: list[str]
-        :return: The planned end state of every affected video.
-        :rtype: list[SeriesPlacement]
+        :return: What the series write did.
+        :rtype: SeriesChange
         """
         if seriesOperation.clear:
-            return await self.seriesService.plan_clear([str(vid) for vid in videoIDs])
+            return await self.seriesService.clear([str(vid) for vid in videoIDs])
 
         ordered = [
             entry.videoId
             for entry in sorted(seriesOperation.orders, key=lambda e: e.order)
         ]
-        return await self.seriesService.plan_assignment(seriesOperation.name, ordered)
-
-    @staticmethod
-    async def _series_bystander_operations(
-        seriesPlan: dict[str, "SeriesPlacement"], videoIDs: list[str]
-    ) -> list[UpdateOne]:
-        """
-        Build the writes for videos the plan moves that the caller never selected.
-
-        A re-order reaches past the selection in both directions — the target series holds
-        members nobody picked, and the series the selection left has to close the gaps it
-        opened. Their stored values are re-read here so that only the ones that actually
-        move are written: permuting a selection inside an already-contiguous series must
-        not rewrite the rest of the series.
-
-        :param seriesPlan: The planned end state per video ID.
-        :type seriesPlan: dict[str, SeriesPlacement]
-        :param videoIDs: The selected video IDs, which are written along with the rest of their edits.
-        :type videoIDs: list[str]
-        :return: One update per bystander whose membership or order changes.
-        :rtype: list[UpdateOne]
-        """
-        selected = {str(vid) for vid in videoIDs}
-        bystander_ids = [vid for vid in seriesPlan if vid not in selected]
-        if not bystander_ids:
-            return []
-
-        stored = await VideoModel.find(
-            {"_id": {"$in": [ObjectId(vid) for vid in bystander_ids]}}
-        ).to_list()
-
-        operations = []
-        for video in stored:
-            placement = seriesPlan[str(video.id)]
-            if (video.seriesName, video.seriesOrder) == (placement.series_name, placement.order):
-                continue
-            operations.append(
-                UpdateOne(
-                    {"_id": video.id},
-                    {"$set": {
-                        "seriesName": placement.series_name,
-                        "seriesOrder": placement.order,
-                    }},
-                )
-            )
-        return operations
+        return await self.seriesService.assign(seriesOperation.name, ordered)
 
     async def _update_existing_videos_operations(self,
                                                  video_models: list[VideoModel],
@@ -533,11 +481,9 @@ class BatchOperationService:
                                                  tagsOperation: TagsOperationMappingInputModel,
                                                  operations: list[UpdateOne],
                                                  no_need_update_flag: bool,
-                                                 update_tags: dict[str, tuple[int, bool]],
-                                                 seriesOperation: SeriesOperationInputModel | None,
-                                                 seriesPlan: dict[str, SeriesPlacement]):
+                                                 update_tags: dict[str, tuple[int, bool]]):
         """
-        Helper function to prepare update operations for existing videos based on provided author, tagsOperation, and seriesOperation.
+        Helper function to prepare update operations for existing videos based on provided author and tagsOperation.
         
         :param video_models: List of video models to prepare update operations for.
         :type video_models: list[VideoModel]
@@ -553,10 +499,6 @@ class BatchOperationService:
         :type no_need_update_flag: bool
         :param update_tags: Dictionary to track tag count changes (modified in-place).
         :type update_tags: dict[str, tuple[int, bool]]
-        :param seriesOperation: The series operation to apply to the videos (optional, only applicable when findById is True).
-        :type seriesOperation: SeriesOperationInputModel | None
-        :param seriesPlan: The planned end state per video ID (only applicable when seriesOperation is provided).
-        :type seriesPlan: dict[str, SeriesPlacement]
         :return: Updated no_need_update_flag indicating whether any updates are needed.
         :rtype: bool
         """
@@ -593,14 +535,6 @@ class BatchOperationService:
                 if duration is not None and duration > 0.0:
                     update_query["duration"] = duration
 
-            if seriesOperation is not None:
-                placement = seriesPlan.get(str(video_model.id))
-                if placement is not None:
-                    if video_model.seriesName != placement.series_name:
-                        update_query["seriesName"] = placement.series_name
-                    if video_model.seriesOrder != placement.order:
-                        update_query["seriesOrder"] = placement.order
-
             if update_query:
                 operations.append(UpdateOne(filter_query, {"$set": update_query}))
 
@@ -611,7 +545,7 @@ class BatchOperationService:
 
     async def _remove_videos_and_update_tags(self, actually_deleted: list[VideoModel], category: str) -> None:
         """
-        Helper function to remove video files and update tag counts after videos have been deleted.
+        Helper function to remove video files, series memberships and tag counts after videos have been deleted.
 
         :param actually_deleted: List of video models that were actually deleted from the database.
         :type actually_deleted: list[VideoModel]
@@ -620,6 +554,7 @@ class BatchOperationService:
         """
         paths_to_delete = [v.path for v in actually_deleted]
         await run_in_threadpool(self._remove_videos_by_paths, paths_to_delete, category)
+        await self.seriesService.detach([str(v.id) for v in actually_deleted])
 
         update_tags: dict[str, tuple[int, bool]] = {}
         for video in actually_deleted:

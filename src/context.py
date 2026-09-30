@@ -181,12 +181,14 @@ def get_migration_service(
     resource_handler_service=Depends(get_resource_handler_service),
     dir_metadata_service=Depends(get_dir_metadata_service),
     settings: Settings = Depends(get_settings),
+    series_service=Depends(get_series_service),
 ):
     global _migration_service
     if _migration_service is None:
         _migration_service = MigrationService(
             resource_handler_service=resource_handler_service,
             dir_metadata_service=dir_metadata_service,
+            series_service=series_service,
             progress_flush_interval=settings.tasks.progress_flush_interval,
         )
     return _migration_service
@@ -211,7 +213,7 @@ async def init_task_runner() -> TaskRunner:
         settings, resource_handler_service, cache_service
     )
     migration_service = get_migration_service(
-        resource_handler_service, dir_metadata_service, settings
+        resource_handler_service, dir_metadata_service, settings, get_series_service()
     )
 
     runner = get_task_runner(settings)
