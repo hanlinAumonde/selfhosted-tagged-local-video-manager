@@ -12,6 +12,7 @@ from src import config
 from src.features.browsing.dir_metadata import DirMetadataModel
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.config import Settings
+from src.features.catalog.series import SeriesModel
 from src.features.catalog.video_tag import VideoTagModel
 from src.features.catalog.video import VideoModel
 
@@ -76,9 +77,10 @@ async def init_db(mock_get_settings, test_settings: Settings):
         mongo_uri += mongo_host_port
     print(f"Connecting to MongoDB at {mongo_uri}")
     client = AsyncMongoClient(mongo_uri)
-    await init_beanie(database=client.get_database(mongo_config.database), document_models=[VideoModel, VideoTagModel, DirMetadataModel, MigrationTaskModel])
+    await init_beanie(database=client.get_database(mongo_config.database), document_models=[VideoModel, VideoTagModel, DirMetadataModel, MigrationTaskModel, SeriesModel])
 
     yield
+    await SeriesModel.delete_all()
     await VideoModel.delete_all()
     await VideoTagModel.delete_all()
     await DirMetadataModel.delete_all()
@@ -113,6 +115,25 @@ def video_factory(init_db) -> Callable:
         video = VideoModel(**defaults)
         await video.insert()
         return video
+    return _create
+
+
+@pytest_asyncio.fixture
+def series_factory(init_db) -> Callable:
+    """
+    Factory fixture to create a SeriesModel listing the given videos, in that order, and
+    point each of them back at it.
+
+    Usage:
+        series = await series_factory("Show", a, b, c)
+    """
+    async def _create(name: str, *videos: VideoModel) -> SeriesModel:
+        series = SeriesModel(name=name, videoIds=[v.id for v in videos])
+        await series.insert()
+        for video in videos:
+            video.seriesId = series.id
+            await video.save()
+        return series
     return _create
 
 

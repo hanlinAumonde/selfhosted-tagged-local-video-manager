@@ -23,12 +23,13 @@ from src.features.browsing.browse_file_service import (
     BrowseEntry,
     BrowseFileService,
     DirectoryEntry,
-    DirectorySearchCriteria
+    DirectorySearchCriteria,
+    VideoEntry,
 )
 from src.features.catalog.catalog_service import CatalogService, VideoSearchCriteria
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.storage.absolute_path import AbsolutePath
-from src.features.catalog.series_service import SeriesService
+from src.features.catalog.series_service import SeriesPlacement, SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
 
 logger = get_logger("query_resolver")
@@ -69,6 +70,7 @@ async def resolve_search_videos(input: VideoSearchInput, info: strawberry.Info) 
         )
     )
 
+    positions = await _series_positions(info, page.videos)
     return VideoSearchResult(
         pagination=Pagination(
             size=page.page_size,
@@ -76,7 +78,11 @@ async def resolve_search_videos(input: VideoSearchInput, info: strawberry.Info) 
             currentPageNumber=page.page_number,
         ),
         videos=[
-            await Video.from_mongoDB(video, isLocked=video.path in page.locked_paths)
+            await Video.from_mongoDB(
+                video,
+                isLocked=video.path in page.locked_paths,
+                series=positions.get(str(video.id)),
+            )
             for video in page.videos
         ],
     )
@@ -137,8 +143,11 @@ async def resolve_get_video_by_id(videoId: strawberry.ID, info: strawberry.Info)
 
     # Returned rather than refused: the player page needs the metadata in order to show
     # why playback is unavailable.
+    positions = await _series_positions(info, [video_model])
     return await Video.from_mongoDB(
-        video_model, isLocked=await catalogService.is_locked(video_model.path)
+        video_model,
+        isLocked=await catalogService.is_locked(video_model.path),
+        series=positions.get(str(video_model.id)),
     )
 
 async def resolve_browse_directory(input: RelativePathInput, info: strawberry.Info) -> list[FileBrowseNode]:
@@ -168,7 +177,7 @@ async def resolve_browse_directory(input: RelativePathInput, info: strawberry.In
         skipCache=relativePathInputModel.skipCache,
         recursiveCalculation=relativePathInputModel.recursiveCalculation
     )
-    return [await _to_browse_node(entry) for entry in entries]
+    return await _to_browse_nodes(entries, info)
 
 
 async def resolve_search_in_directory(input: SearchInDirectoryInput, info: strawberry.Info) -> list[FileBrowseNode]:
@@ -206,10 +215,25 @@ async def resolve_search_in_directory(input: SearchInDirectoryInput, info: straw
             tags=validated_input.tags,
         )
     )
-    return [await _to_browse_node(entry) for entry in entries]
+    return await _to_browse_nodes(entries, info)
 
 
-async def _to_browse_node(entry: BrowseEntry) -> FileBrowseNode:
+async def _to_browse_nodes(entries: list[BrowseEntry], info: strawberry.Info) -> list[FileBrowseNode]:
+    """Present a listing, resolving the series position of every video row in one lookup."""
+    positions = await _series_positions(
+        info, [e.document for e in entries if isinstance(e, VideoEntry)]
+    )
+    return [await _to_browse_node(entry, positions) for entry in entries]
+
+
+async def _series_positions(info: strawberry.Info, video_models: list) -> dict[str, SeriesPlacement]:
+    seriesService: SeriesService = get_context_value(info, ContextEnum.SERIES_SERVICE)
+    return await seriesService.positions_of(video_models)
+
+
+async def _to_browse_node(
+    entry: BrowseEntry, positions: dict[str, SeriesPlacement]
+) -> FileBrowseNode:
     """
     Present one directory-listing entry as the GraphQL node the frontend consumes.
 
@@ -220,6 +244,8 @@ async def _to_browse_node(entry: BrowseEntry) -> FileBrowseNode:
 
     :param entry: A directory or video row produced by ``BrowseFileService``.
     :type entry: BrowseEntry
+    :param positions: Series placements for the listing's videos, keyed by video id.
+    :type positions: dict[str, SeriesPlacement]
     :return: The node in its published shape.
     :rtype: FileBrowseNode
     """
@@ -242,6 +268,7 @@ async def _to_browse_node(entry: BrowseEntry) -> FileBrowseNode:
             # Empty means "in the directory that was asked about", which is every row of
             # an ordinary listing — published as null rather than as an empty string.
             relativePath=entry.relative_dir or None,
+            series=positions.get(str(entry.document.id)),
         )
     )
 
@@ -287,8 +314,11 @@ async def resolve_get_series_videos(name: str, info: strawberry.Info) -> list[Vi
         video_models = await seriesService.get_videos_in_series(name, valid_categories)
         catalogService: CatalogService = get_context_value(info, ContextEnum.CATALOG_SERVICE)
         locked_paths = await catalogService.locked_paths(vm.path for vm in video_models)
+        positions = await seriesService.positions_of(video_models)
         return [
-            await Video.from_mongoDB(vm, isLocked=vm.path in locked_paths)
+            await Video.from_mongoDB(
+                vm, isLocked=vm.path in locked_paths, series=positions.get(str(vm.id))
+            )
             for vm in video_models
         ]
     except Exception as e:

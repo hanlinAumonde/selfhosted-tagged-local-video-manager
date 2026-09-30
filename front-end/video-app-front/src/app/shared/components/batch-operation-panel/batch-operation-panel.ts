@@ -71,6 +71,20 @@ export class BatchOperationPanel {
   readonly videoIds = this.data.videos ?? new Set<string>();
   readonly directoryPath = this.data.selectedDirectoryPath ?? '';
 
+  /*
+    The one series every selected video already belongs to, or null when they disagree or
+    some belong to none. It seeds the name field, so opening the panel on a series and
+    reordering it does not first require retyping the name it is already in.
+  */
+  private readonly sharedSeriesName = BatchOperationPanel.sharedSeries(this.data.videoItems ?? []);
+
+  private static sharedSeries(items: ReadonlyArray<BatchPanelVideoItem>): string | null {
+    if (items.length === 0) return null;
+    const first = items[0].seriesName;
+    if (!first) return null;
+    return items.every(item => item.seriesName === first) ? first : null;
+  }
+
   protected model = signal({
     author: '',
     addTags: [] as string[],
@@ -78,7 +92,7 @@ export class BatchOperationPanel {
     series: {
       modify: false,
       action: 'set',
-      name: '',
+      name: this.sharedSeriesName ?? '',
       // Initial order: by existing seriesOrder ascending, then by name.
       members: [...(this.data.videoItems ?? [])].sort((a, b) => {
         const aHas = a.seriesOrder !== null && a.seriesOrder !== undefined;
@@ -141,6 +155,27 @@ export class BatchOperationPanel {
     }
     return `Selected videos currently span ${existing.length} series (${existing.join(', ')}). Saving will move them all into "${target}".`;
   });
+
+  /*
+    What the selection's current series membership is, for the untouched state. The panel
+    otherwise says nothing about it, so reordering a series looks like assigning a new one.
+  */
+  readonly currentSeriesSummary = computed<string | null>(() => {
+    if (!this.isVideoMode) return null;
+    const items = this.data.videoItems ?? [];
+    if (items.length === 0) return null;
+    if (this.sharedSeriesName) {
+      return `All ${items.length} selected videos are in series "${this.sharedSeriesName}".`;
+    }
+    const existing = this.existingSeriesNames();
+    if (existing.length === 0) return 'None of the selected videos belong to a series.';
+    return `Selected videos span ${existing.length} series (${existing.join(', ')}) and videos with none.`;
+  });
+
+  /** True while the panel is reordering the series the selection already shares. */
+  readonly isReorderingSharedSeries = computed(() =>
+    this.sharedSeriesName !== null && this.model().series.name.trim() === this.sharedSeriesName
+  );
 
   hasSeriesOperation = computed(() => {
     if (!this.isVideoMode) return false;

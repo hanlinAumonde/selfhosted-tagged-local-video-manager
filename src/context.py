@@ -147,6 +147,7 @@ def get_batch_operation_service(
     thumbnail_service = Depends(get_thumbnail_service),
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
+    series_service = Depends(get_series_service),
 ):
     return BatchOperationService(
         dir_metadata_service=dir_metadata_service,
@@ -154,6 +155,7 @@ def get_batch_operation_service(
         thumbnail_service=thumbnail_service,
         resource_handler_service=resource_handler_service,
         ffmpeg_service=ffmpeg_service,
+        series_service=series_service,
     )
 
 def get_catalog_service(
@@ -163,6 +165,7 @@ def get_catalog_service(
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
     path_locks = Depends(get_path_lock_registry),
+    series_service = Depends(get_series_service),
 ):
     return CatalogService(
         settings=settings,
@@ -171,18 +174,21 @@ def get_catalog_service(
         resource_handler_service=resource_handler_service,
         ffmpeg_service=ffmpeg_service,
         path_locks=path_locks,
+        series_service=series_service,
     )
 
 def get_migration_service(
     resource_handler_service=Depends(get_resource_handler_service),
     dir_metadata_service=Depends(get_dir_metadata_service),
     settings: Settings = Depends(get_settings),
+    series_service=Depends(get_series_service),
 ):
     global _migration_service
     if _migration_service is None:
         _migration_service = MigrationService(
             resource_handler_service=resource_handler_service,
             dir_metadata_service=dir_metadata_service,
+            series_service=series_service,
             progress_flush_interval=settings.tasks.progress_flush_interval,
         )
     return _migration_service
@@ -207,7 +213,7 @@ async def init_task_runner() -> TaskRunner:
         settings, resource_handler_service, cache_service
     )
     migration_service = get_migration_service(
-        resource_handler_service, dir_metadata_service, settings
+        resource_handler_service, dir_metadata_service, settings, get_series_service()
     )
 
     runner = get_task_runner(settings)

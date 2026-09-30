@@ -15,25 +15,22 @@
       }
     </mat-chip-set>
   }
-
   <mat-form-field appearance="outline" class="w-full">
     @if (label()) {
       <mat-label>{{ label() }}</mat-label>
     }
     <input
       matInput
-      autocomplete="off"
-      [value]="draft()"
+      [formField]="form.content"
       [placeholder]="placeholder()"
       [matAutocomplete]="tagAuto"
-      (input)="onDraftInput($event)"
       (blur)="touch.emit()"
       (keydown.enter)="onEnter($event)" />
-    @if (draftError(); as message) {
-      <mat-error>{{ message }}</mat-error>
+    @if (form.content().touched() && form.content().invalid()) {
+      <mat-error>{{ form.content().errors()[0].message }}</mat-error>
     }
     <mat-icon matSuffix fontIcon="expand_more"></mat-icon>
-    <mat-autocomplete #tagAuto="matAutocomplete" (optionSelected)="commit($event.option.value)">
+    <mat-autocomplete #tagAuto="matAutocomplete" [displayWith]="displayNothing" (optionSelected)="commit($event.option.value)">
       @if (suggestions().loading) {
         <mat-option disabled>
           <mat-progress-spinner diameter="20" mode="indeterminate"></mat-progress-spinner>

@@ -15,11 +15,12 @@ pytestmark = pytest.mark.query
 # ----------------------------- searchSeriesByPrefix ----------------------------
 
 async def test_search_series_by_prefix_returns_distinct(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    await video_factory(name="v1", seriesName="Sherlock", seriesOrder=1)
-    await video_factory(name="v2", seriesName="Sherlock", seriesOrder=2)
-    await video_factory(name="v3", seriesName="Stranger Things", seriesOrder=1)
+    v1 = await video_factory(name="v1")
+    v2 = await video_factory(name="v2")
+    await series_factory("Sherlock", v1, v2)
+    await series_factory("Stranger Things", await video_factory(name="v3"))
 
     result = await execute_gql(
         SEARCH_SERIES_BY_PREFIX, {"prefix": "S", "limit": 10}
@@ -30,8 +31,10 @@ async def test_search_series_by_prefix_returns_distinct(
     assert series == ["Sherlock", "Stranger Things"]
 
 
-async def test_search_series_by_prefix_case_insensitive(execute_gql, video_factory):
-    await video_factory(name="v1", seriesName="Sherlock", seriesOrder=1)
+async def test_search_series_by_prefix_case_insensitive(
+    execute_gql, video_factory, series_factory
+):
+    await series_factory("Sherlock", await video_factory(name="v1"))
 
     result = await execute_gql(
         SEARCH_SERIES_BY_PREFIX, {"prefix": "sher", "limit": 10}
@@ -41,8 +44,10 @@ async def test_search_series_by_prefix_case_insensitive(execute_gql, video_facto
     assert result.data["searchSeriesByPrefix"] == ["Sherlock"]
 
 
-async def test_search_series_by_prefix_no_match(execute_gql, video_factory):
-    await video_factory(name="v1", seriesName="Sherlock", seriesOrder=1)
+async def test_search_series_by_prefix_no_match(
+    execute_gql, video_factory, series_factory
+):
+    await series_factory("Sherlock", await video_factory(name="v1"))
 
     result = await execute_gql(
         SEARCH_SERIES_BY_PREFIX, {"prefix": "Z", "limit": 10}
@@ -70,11 +75,14 @@ async def test_search_series_by_prefix_negative_limit(execute_gql, init_db):
 
 # -------------------------------- getSeriesVideos ------------------------------
 
-async def test_get_series_videos_returns_in_order(execute_gql, video_factory):
-    await video_factory(name="ep3", seriesName="MyShow", seriesOrder=3)
-    await video_factory(name="ep1", seriesName="MyShow", seriesOrder=1)
-    await video_factory(name="ep2", seriesName="MyShow", seriesOrder=2)
-    await video_factory(name="other", seriesName="OtherShow", seriesOrder=1)
+async def test_get_series_videos_returns_in_order(
+    execute_gql, video_factory, series_factory
+):
+    ep3 = await video_factory(name="ep3")
+    ep1 = await video_factory(name="ep1")
+    ep2 = await video_factory(name="ep2")
+    await series_factory("MyShow", ep1, ep2, ep3)
+    await series_factory("OtherShow", await video_factory(name="other"))
 
     result = await execute_gql(GET_SERIES_VIDEOS, {"name": "MyShow"})
 
@@ -90,9 +98,9 @@ async def test_get_series_videos_empty_name(execute_gql, init_db):
 
 
 async def test_get_series_videos_excludes_invalid_categories(
-    execute_gql, video_factory, monkeypatch, test_settings
+    execute_gql, video_factory, series_factory, monkeypatch, test_settings
 ):
-    await video_factory(name="ep1", seriesName="X", seriesOrder=1)
+    await series_factory("X", await video_factory(name="ep1"))
     monkeypatch.setattr(test_settings, "resource_paths", {})
 
     result = await execute_gql(GET_SERIES_VIDEOS, {"name": "X"})

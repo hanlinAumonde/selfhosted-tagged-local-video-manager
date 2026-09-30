@@ -7,6 +7,7 @@ from src.features.migration.migration_task import TaskStatus
 
 from src.features.catalog.video import VideoModel
 from src.features.catalog.video_tag import VideoTagModel
+from tests.series_helpers import stored_series
 from tests.graphql.helpers import (
     UPDATE_VIDEO_METADATA,
     assert_error_contains,
@@ -81,10 +82,9 @@ async def test_update_video_tags_increments_new_decrements_old(
 
 # ----------------------------- Series field --------------------------------
 
-async def test_update_video_series_clear(execute_gql, video_factory):
-    video = await video_factory(
-        name="v", seriesName="Foo", seriesOrder=1
-    )
+async def test_update_video_series_clear(execute_gql, video_factory, series_factory):
+    video = await video_factory(name="v")
+    await series_factory("Foo", video)
 
     payload = make_update_input(
         str(video.id),
@@ -99,13 +99,15 @@ async def test_update_video_series_clear(execute_gql, video_factory):
     assert body["video"]["seriesOrder"] is None
 
     refreshed = await VideoModel.get(video.id)
-    assert refreshed.seriesName is None
-    assert refreshed.seriesOrder is None
+    assert refreshed.seriesId is None
 
 
-async def test_update_video_series_rewrites_ordering(execute_gql, video_factory):
-    a = await video_factory(name="A", seriesName="MyShow", seriesOrder=1)
-    b = await video_factory(name="B", seriesName="MyShow", seriesOrder=2)
+async def test_update_video_series_rewrites_ordering(
+    execute_gql, video_factory, series_factory
+):
+    a = await video_factory(name="A")
+    b = await video_factory(name="B")
+    await series_factory("MyShow", a, b)
 
     payload = make_update_input(
         str(a.id),
@@ -122,17 +124,15 @@ async def test_update_video_series_rewrites_ordering(execute_gql, video_factory)
     result = await execute_gql(UPDATE_VIDEO_METADATA, {"input": payload})
 
     assert_no_errors(result)
-    a_refreshed = await VideoModel.get(a.id)
-    b_refreshed = await VideoModel.get(b.id)
-    assert a_refreshed.seriesOrder == 2
-    assert b_refreshed.seriesOrder == 1
+    assert await stored_series("MyShow") == ["B", "A"]
 
 
 async def test_update_video_series_orders_missing_current_video(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
-    b = await video_factory(name="B", seriesName="S", seriesOrder=2)
+    a = await video_factory(name="A")
+    b = await video_factory(name="B")
+    await series_factory("S", a, b)
 
     payload = make_update_input(
         str(a.id),
@@ -147,9 +147,12 @@ async def test_update_video_series_orders_missing_current_video(
     assert_error_contains(result, "orders")
 
 
-async def test_update_video_series_duplicate_order(execute_gql, video_factory):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
-    b = await video_factory(name="B", seriesName="S", seriesOrder=2)
+async def test_update_video_series_duplicate_order(
+    execute_gql, video_factory, series_factory
+):
+    a = await video_factory(name="A")
+    b = await video_factory(name="B")
+    await series_factory("S", a, b)
 
     payload = make_update_input(
         str(a.id),
@@ -168,10 +171,12 @@ async def test_update_video_series_duplicate_order(execute_gql, video_factory):
 
 
 async def test_update_video_series_other_video_not_in_target_series(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
-    foreign = await video_factory(name="F", seriesName="OtherShow", seriesOrder=1)
+    a = await video_factory(name="A")
+    await series_factory("S", a)
+    foreign = await video_factory(name="F")
+    await series_factory("OtherShow", foreign)
 
     payload = make_update_input(
         str(a.id),
@@ -190,9 +195,10 @@ async def test_update_video_series_other_video_not_in_target_series(
 
 
 async def test_update_video_series_invalid_object_id_in_orders(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
+    a = await video_factory(name="A")
+    await series_factory("S", a)
 
     payload = make_update_input(
         str(a.id),
@@ -264,9 +270,10 @@ async def test_update_video_migration_locked(execute_gql, video_factory, task_fa
 # ----------------------- Series validation edge cases ------------------------
 
 async def test_update_video_series_duplicate_video_id_in_orders(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
+    a = await video_factory(name="A")
+    await series_factory("S", a)
 
     payload = make_update_input(
         str(a.id),
@@ -285,9 +292,10 @@ async def test_update_video_series_duplicate_video_id_in_orders(
 
 
 async def test_update_video_series_nonexistent_video_id_in_orders(
-    execute_gql, video_factory
+    execute_gql, video_factory, series_factory
 ):
-    a = await video_factory(name="A", seriesName="S", seriesOrder=1)
+    a = await video_factory(name="A")
+    await series_factory("S", a)
     fake_id = str(ObjectId())
 
     payload = make_update_input(

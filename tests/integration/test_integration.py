@@ -5,6 +5,7 @@ from src.features.catalog.video import VideoModel
 from src.features.catalog.video_tag import VideoTagModel
 from tests.integration.graphql_documents import *
 from tests.integration.helpers import *
+from tests.series_helpers import stored_series
 
 # -----------------------------------------------------------------------
 # Test: Browse directory discovers files and inserts into DB
@@ -333,8 +334,11 @@ class TestSeriesManagement:
         assert videos[0]["seriesOrder"] == 1
         assert videos[1]["seriesOrder"] == 2
 
-    async def test_search_series_by_prefix(self, execute_gql, init_db, video_factory):
-        v = await video_factory(name="ser_v", seriesName="DragonBall")
+    async def test_search_series_by_prefix(
+        self, execute_gql, init_db, video_factory, series_factory
+    ):
+        v = await video_factory(name="ser_v")
+        await series_factory("DragonBall", v)
         result = await execute_gql(SEARCH_SERIES_BY_PREFIX, {
             "prefix": "Dragon",
             "limit": 5,
@@ -342,8 +346,9 @@ class TestSeriesManagement:
         assert_no_errors(result)
         assert "DragonBall" in result.data["searchSeriesByPrefix"]
 
-    async def test_clear_series(self, execute_gql, init_db, video_factory):
-        v = await video_factory(name="clear_v", seriesName="OldSeries", seriesOrder=1)
+    async def test_clear_series(self, execute_gql, init_db, video_factory, series_factory):
+        v = await video_factory(name="clear_v")
+        await series_factory("OldSeries", v)
         vid = str(v.id)
         await execute_gql(UPDATE_VIDEO_METADATA, {"input": {
             "videoId": vid,
@@ -543,12 +548,7 @@ class TestBatchOperations:
         last_event = events[-1]
         assert last_event.data["batchUpdateSubscription"]["result"]["resultType"] == "Success"
 
-        updated_v1 = await VideoModel.get(v1.id)
-        updated_v2 = await VideoModel.get(v2.id)
-        assert updated_v1.seriesName == "BatchSeries"
-        assert updated_v1.seriesOrder == 1
-        assert updated_v2.seriesName == "BatchSeries"
-        assert updated_v2.seriesOrder == 2
+        assert await stored_series("BatchSeries") == ["ser_batch1", "ser_batch2"]
 
 
 # -----------------------------------------------------------------------

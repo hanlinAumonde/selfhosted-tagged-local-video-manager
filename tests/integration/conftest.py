@@ -154,6 +154,7 @@ def real_path_lock_registry(
         MigrationService(
             resource_handler_service=real_resource_handler_service,
             dir_metadata_service=real_dir_metadata_service,
+            series_service=SeriesService(),
         ),
     )
     return registry
@@ -190,6 +191,7 @@ def real_batch_operation_service(
         thumbnail_service=mock_thumbnail_service,
         resource_handler_service=real_resource_handler_service,
         ffmpeg_service=mock_ffmpeg_service,
+        series_service=SeriesService(),
     )
 
 
@@ -209,6 +211,7 @@ def real_catalog_service(
         resource_handler_service=real_resource_handler_service,
         ffmpeg_service=mock_ffmpeg_service,
         path_locks=real_path_lock_registry,
+        series_service=SeriesService(),
     )
 
 

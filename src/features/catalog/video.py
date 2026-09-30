@@ -1,5 +1,5 @@
 from typing import Optional
-from beanie import Document, Indexed, before_event, Insert, Replace
+from beanie import Document, Indexed, PydanticObjectId, before_event, Insert, Replace
 import pymongo
 
 from src.config import get_settings
@@ -21,8 +21,9 @@ class VideoModel(Document):
     thumbnail: Optional[str] = None
     duration: Optional[float] = 0.0
 
-    seriesName: Optional[str] = None
-    seriesOrder: Optional[int] = None
+    # Back-reference to SeriesModel, kept by SeriesService alone; the series' videoIds
+    # remain the source of truth for membership and order.
+    seriesId: Optional[PydanticObjectId] = None
 
     @before_event(Insert, Replace)
     def validate_category(self):
@@ -44,6 +45,5 @@ class VideoModel(Document):
             # compound index: viewCount + lastViewTime (used for popular videos)
             [("viewCount", pymongo.DESCENDING), ("lastViewTime", pymongo.DESCENDING)],
             [("duration", pymongo.DESCENDING)],
-            # compound index: seriesName + seriesOrder (used for listing a series in order)
-            [("seriesName", pymongo.ASCENDING), ("seriesOrder", pymongo.ASCENDING)],
+            [("seriesId", pymongo.ASCENDING)],
         ]

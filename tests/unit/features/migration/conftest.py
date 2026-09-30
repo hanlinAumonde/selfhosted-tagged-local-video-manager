@@ -2,6 +2,7 @@ import pytest
 
 from src.config import Settings
 from src.features.browsing.dir_metadata_service import DirMetadataService
+from src.features.catalog.series_service import SeriesService
 from src.features.migration.migration_service import MigrationService
 from src.platform.cache.cache_service import CacheService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
@@ -21,6 +22,7 @@ def migration_svc(
     return MigrationService(
         resource_handler_service=local_resource_handler_service,
         dir_metadata_service=dir_meta,
+        series_service=SeriesService(),
     )
 
 
@@ -38,4 +40,5 @@ def two_cat_migration_svc(
     return MigrationService(
         resource_handler_service=two_cat_handler_service,
         dir_metadata_service=dir_meta,
+        series_service=SeriesService(),
     )

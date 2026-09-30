@@ -6,6 +6,7 @@ from src.config import Settings
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.browse_file_service import BrowseFileService
 from src.features.browsing.dir_metadata_service import DirMetadataService
+from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
 from src.platform.cache.cache_service import CacheService
@@ -60,6 +61,7 @@ def migration_path_locks(
         MigrationService(
             resource_handler_service=local_resource_handler_service,
             dir_metadata_service=dir_meta_svc,
+            series_service=SeriesService(),
         ),
     )
     return registry
@@ -108,4 +110,5 @@ def batch_svc(
         thumbnail_service=mock_thumbnail,
         resource_handler_service=local_resource_handler_service,
         ffmpeg_service=mock_ffmpeg,
+        series_service=SeriesService(),
     )

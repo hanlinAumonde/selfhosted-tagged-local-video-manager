@@ -14,6 +14,7 @@ from src.schema.types.pydantic_types.batch_operation_type import (
 )
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
+from tests.series_helpers import series_name_of, stored_series
 
 pytestmark = pytest.mark.unit
 
@@ -140,9 +141,10 @@ async def test_batch_update_sets_author_and_tags(
 
 
 async def test_batch_update_clears_series(
-    batch_svc, init_db, video_factory, fs_settings,
+    batch_svc, init_db, video_factory, series_factory, fs_settings,
 ):
-    v = await video_factory(name="ep", seriesName="S", seriesOrder=1)
+    v = await video_factory(name="ep")
+    await series_factory("S", v)
 
     await _collect(
         batch_svc.batch_update(
@@ -155,9 +157,8 @@ async def test_batch_update_clears_series(
         )
     )
 
-    refreshed = await VideoModel.get(v.id)
-    assert refreshed.seriesName is None
-    assert refreshed.seriesOrder is None
+    assert await series_name_of(v) is None
+    assert await stored_series("S") is None
 
 
 async def test_batch_update_assigns_series_with_orders(
@@ -184,12 +185,9 @@ async def test_batch_update_assigns_series_with_orders(
         )
     )
 
-    a_refreshed = await VideoModel.get(a.id)
-    b_refreshed = await VideoModel.get(b.id)
-    assert a_refreshed.seriesName == "MySeries"
-    assert a_refreshed.seriesOrder == 1
-    assert b_refreshed.seriesName == "MySeries"
-    assert b_refreshed.seriesOrder == 2
+    assert await stored_series("MySeries") == ["a", "b"]
+    assert await series_name_of(a) == "MySeries"
+    assert await series_name_of(b) == "MySeries"
 
 
 async def test_batch_update_already_up_to_date(

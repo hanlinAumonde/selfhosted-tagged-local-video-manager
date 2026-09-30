@@ -5,6 +5,7 @@ import pytest
 from src.config import Settings
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.catalog_service import CatalogService
+from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
 from src.platform.cache.cache_service import CacheService
 from src.platform.media.ffmpeg_service import FFmpegService
@@ -32,5 +33,6 @@ def catalog_svc_factory(
             resource_handler_service=local_resource_handler_service,
             ffmpeg_service=ffmpeg,
             path_locks=registry,
+            series_service=SeriesService(),
         )
     return _build
