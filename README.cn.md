@@ -5,8 +5,8 @@
 **Video App** - 面向本地文件系统与 S3 兼容存储的自托管视频元数据管理、流媒体播放与浏览平台
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.128-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Strawberry](https://img.shields.io/badge/Strawberry%20GraphQL-0.289-ff6b9d)](https://strawberry.rocks/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.142-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Strawberry](https://img.shields.io/badge/Strawberry%20GraphQL-0.331-ff6b9d)](https://strawberry.rocks/)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular)](https://angular.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Beanie%20ODM-47A248?logo=mongodb)](https://www.mongodb.com/)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ed?logo=docker)](https://www.docker.com/)
@@ -44,16 +44,16 @@ platform/              storage · media · cache · jobs（可复用内核，不
 | 技术 | 版本 | 说明 |
 | ---- | ---- | ---- |
 | Python | 3.12+ | 开发语言（由 [uv](https://docs.astral.sh/uv/) 管理） |
-| FastAPI | 0.128.0 | Web 框架 |
-| Strawberry GraphQL | 0.289.2 | GraphQL 服务端（查询、变更、WebSocket 订阅、自定义标量） |
-| MongoDB + Beanie | 2.0.1 | 数据库 + 异步 ODM |
-| Motor / PyMongo | 3.7+ / 4.16 | 异步 MongoDB 驱动 |
-| Pydantic | 2.12.5 | 输入契约与配置 |
-| boto3 | 1.42+ | S3 兼容存储 |
-| cachetools | 6.2+ | 内存 TTL 缓存 |
+| FastAPI | 0.142.2 | Web 框架 |
+| Strawberry GraphQL | 0.331.6 | GraphQL 服务端（查询、变更、WebSocket 订阅、自定义标量） |
+| MongoDB + Beanie | 2.2.0 | 数据库 + 异步 ODM |
+| PyMongo | 4.18 | 异步 MongoDB 驱动 |
+| Pydantic | 2.13.5 | 输入契约与配置 |
+| boto3 | 1.43+ | S3 兼容存储 |
+| cachetools | 7.2+ | 内存 TTL 缓存 |
 | loguru | 0.7+ | 结构化日志 |
 | envyaml | 1.10+ | `config.yaml` 的 `$VAR\|default` 语法支持 |
-| pytest | 8.0+ | 测试（单元 + GraphQL + 集成） |
+| pytest | 9.1+ | 测试（单元 + GraphQL + 集成） |
 
 ### 前端技术
 
@@ -293,20 +293,6 @@ docker-compose down
 docker image prune -f
 ```
 
-## 版本升级
-
-### 系列迁移到独立集合
-
-旧版本把系列存成每个视频上的 `seriesName` / `seriesOrder`。现在后端只从 `series` 集合读取系列，所以**已有数据库在启动新版后端之前必须迁移一次**，否则所有系列都会显示为空。
-
-先备份数据库，然后在宿主机的项目根目录运行（Docker 镜像不包含 `scripts/`；让 `config.yaml` 指向对应的 MongoDB，例如 compose 里的服务为 `localhost:27017`）：
-
-```bash
-uv run python -m scripts.migrate_series_to_collection
-```
-
-脚本按旧的系列名分组，保留原来的显示顺序（有编号的在前，同号按名称），回写每个视频的 `seriesId`，并删除旧字段和旧索引。脚本是幂等的：重复运行、或中断后再运行都安全。GraphQL 接口没有变化，前端无需为此重新构建。
-
 ## 效果展示
 
 <!-- TODO: 效果截图 -->
@@ -320,9 +306,6 @@ video-app/
 ├── Dockerfile                       # 后端镜像构建
 ├── docker-compose.yml               # 前端 + 后端 + MongoDB + RustFS
 ├── pyproject.toml                   # 项目依赖与元数据
-│
-├── scripts/
-│   └── migrate_series_to_collection.py  # 一次性：旧系列字段 → series 集合
 │
 ├── src/
 │   ├── app.py                       # 应用工厂：日志、Mongo、TaskRunner 启动、CORS、路由
@@ -381,14 +364,13 @@ video-app/
 │           ├── migration_type.py · scalars.py
 │           └── pydantic_types/      # GraphQL 输入契约
 │
-├── tests/                           # 703 个用例（pytest --strict-markers），覆盖率 90%
+├── tests/                           # 695 个用例（pytest --strict-markers），覆盖率 90%
 │   ├── conftest.py                  # test_settings、MongoDB、文档 factory
 │   ├── unit/                        # 目录结构镜像 src/
 │   │   ├── test_architecture.py     # 依赖方向守卫（AST 扫描）
 │   │   ├── test_context_wiring.py · test_task_runner_bootstrap.py
 │   │   ├── platform/                # cache · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
-│   │   ├── scripts/                 # 一次性数据迁移
 │   │   └── schema/                  # Pydantic 输入契约
 │   ├── graphql/                     # 解析器测试（查询、变更、订阅）
 │   └── integration/                 # 端到端集成测试（testcontainers MongoDB）

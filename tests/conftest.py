@@ -5,7 +5,7 @@ from beanie import init_beanie
 from pymongo import AsyncMongoClient
 import pytest_asyncio
 from testcontainers.core.container import LogMessageWaitStrategy
-from testcontainers.mongodb import MongoDbContainer
+from testcontainers.community.mongodb import MongoDbContainer
 import pytest
 
 from src import config

@@ -5,8 +5,8 @@ English | [中文](README.cn.md)
 **Video App** - A self-hosted video metadata, streaming and browsing platform over local filesystem and S3-compatible storage
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.128-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Strawberry](https://img.shields.io/badge/Strawberry%20GraphQL-0.289-ff6b9d)](https://strawberry.rocks/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.142-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Strawberry](https://img.shields.io/badge/Strawberry%20GraphQL-0.331-ff6b9d)](https://strawberry.rocks/)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular)](https://angular.dev/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Beanie%20ODM-47A248?logo=mongodb)](https://www.mongodb.com/)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ed?logo=docker)](https://www.docker.com/)
@@ -44,16 +44,16 @@ platform/              storage · media · cache · jobs (reusable, knows no fea
 | Technology | Version | Purpose |
 | ---------- | ------- | ------- |
 | Python | 3.12+ | Language (managed by [uv](https://docs.astral.sh/uv/)) |
-| FastAPI | 0.128.0 | Web framework |
-| Strawberry GraphQL | 0.289.2 | GraphQL server (queries, mutations, WebSocket subscriptions, custom scalars) |
-| MongoDB + Beanie | 2.0.1 | Database + async ODM |
-| Motor / PyMongo | 3.7+ / 4.16 | Async MongoDB driver |
-| Pydantic | 2.12.5 | Input contracts and settings |
-| boto3 | 1.42+ | S3-compatible storage |
-| cachetools | 6.2+ | In-memory TTL cache |
+| FastAPI | 0.142.2 | Web framework |
+| Strawberry GraphQL | 0.331.6 | GraphQL server (queries, mutations, WebSocket subscriptions, custom scalars) |
+| MongoDB + Beanie | 2.2.0 | Database + async ODM |
+| PyMongo | 4.18 | Async MongoDB driver |
+| Pydantic | 2.13.5 | Input contracts and settings |
+| boto3 | 1.43+ | S3-compatible storage |
+| cachetools | 7.2+ | In-memory TTL cache |
 | loguru | 0.7+ | Structured logging |
 | envyaml | 1.10+ | `$VAR\|default` substitution in `config.yaml` |
-| pytest | 8.0+ | Testing (unit + GraphQL + integration) |
+| pytest | 9.1+ | Testing (unit + GraphQL + integration) |
 
 ### Frontend
 
@@ -293,20 +293,6 @@ docker-compose down
 docker image prune -f
 ```
 
-## Upgrading
-
-### Series moved into their own collection
-
-Earlier versions stored a series as `seriesName` / `seriesOrder` on every video. The backend now reads series only from the `series` collection, so **an existing database must be migrated once before starting the new backend** — otherwise every series appears empty.
-
-Back up the database, then run from the project root on the host (the Docker image does not ship `scripts/`; point `config.yaml` at the MongoDB instance, e.g. `localhost:27017` for the compose service):
-
-```bash
-uv run python -m scripts.migrate_series_to_collection
-```
-
-The script groups videos by their old series name, keeps the order they used to read in (numbered first, then by name), writes each video's `seriesId`, and removes the old fields and index. It is idempotent — running it again, or after an interrupted run, is safe. The GraphQL API is unchanged, so the frontend needs no rebuild for this.
-
 ## Screenshots
 
 <!-- TODO: screenshots -->
@@ -320,9 +306,6 @@ video-app/
 ├── Dockerfile                       # Backend image
 ├── docker-compose.yml               # frontend + backend + MongoDB + RustFS
 ├── pyproject.toml                   # Dependencies and metadata
-│
-├── scripts/
-│   └── migrate_series_to_collection.py  # One-off: legacy series fields → series collection
 │
 ├── src/
 │   ├── app.py                       # App factory: logging, Mongo, TaskRunner boot, CORS, routers
@@ -381,14 +364,13 @@ video-app/
 │           ├── migration_type.py · scalars.py
 │           └── pydantic_types/      # GraphQL input contracts
 │
-├── tests/                           # 703 cases (pytest --strict-markers), 90% coverage
+├── tests/                           # 695 cases (pytest --strict-markers), 90% coverage
 │   ├── conftest.py                  # test_settings, MongoDB, document factories
 │   ├── unit/                        # Mirrors src/
 │   │   ├── test_architecture.py     # Dependency-direction guards (AST scan)
 │   │   ├── test_context_wiring.py · test_task_runner_bootstrap.py
 │   │   ├── platform/                # cache · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
-│   │   ├── scripts/                 # One-off data migrations
 │   │   └── schema/                  # Pydantic input contracts
 │   ├── graphql/                     # Resolver tests (queries, mutations, subscriptions)
 │   └── integration/                 # End-to-end (testcontainers MongoDB)

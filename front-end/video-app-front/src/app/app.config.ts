@@ -16,6 +16,24 @@ import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { Kind, OperationTypeNode } from 'graphql';
 
+// Apollo Client derives result types from the default errorPolicy, so the `defaultOptions` below
+// must be declared here too; otherwise results would be typed as if errors always throw.
+declare module '@apollo/client' {
+  export namespace ApolloClient {
+    export namespace DeclareDefaultOptions {
+      interface WatchQuery {
+        errorPolicy: 'all';
+      }
+      interface Query {
+        errorPolicy: 'all';
+      }
+      interface Mutate {
+        errorPolicy: 'all';
+      }
+    }
+  }
+}
+
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),

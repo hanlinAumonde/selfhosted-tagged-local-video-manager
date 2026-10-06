@@ -1,6 +1,6 @@
 import io
 from fastapi import HTTPException
-from starlette.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from src.config import Settings
 from src.features.catalog.video import VideoModel
 from src.logger import get_logger
