@@ -14,6 +14,7 @@ uv.lock
 logs/
 
 .vscode/
+.idea/
 
 mongodb-data/
 rustfs_data/

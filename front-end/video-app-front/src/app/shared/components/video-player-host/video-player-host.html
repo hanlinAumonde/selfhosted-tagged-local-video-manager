@@ -1,7 +1,14 @@
-<video
-  #videoTarget
-  class="video-js vjs-big-play-centered vjs-theme-forest">
-  <p class="vjs-no-js">
-    To view this video please enable JavaScript
-  </p>
-</video>
+<video-player>
+  <video-skin class="player-skin">
+    <!--
+      A null src leaves the attribute off until the stream URL is ready; an empty one would make the
+      browser try to load the page itself. Swapping src runs the native load algorithm, which also
+      rewinds to 0, so a new video never resumes at the previous one's offset.
+    -->
+    <video
+      [attr.src]="src() || null"
+      (play)="played.emit()"
+      preload="auto"
+      playsinline></video>
+  </video-skin>
+</video-player>
