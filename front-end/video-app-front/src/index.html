@@ -6,7 +6,12 @@
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <!--
+    Self-hosted and preloaded: the browser only fetches a web font once something renders with it,
+    so without the preload the sidebar's icons start out as zero-width boxes and the layout jumps
+    when the font arrives. The @font-face lives in styles.css.
+  -->
+  <link rel="preload" href="fonts/material-icons-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
 <body>

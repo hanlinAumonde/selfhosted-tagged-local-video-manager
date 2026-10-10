@@ -1,6 +1,6 @@
 from enum import Enum
 import strawberry
-from typing_extensions import Annotated
+from typing import Annotated
 from fastapi import Depends
 from src.config import Settings, get_settings
 
@@ -44,33 +44,33 @@ _migration_service: MigrationService | None = None
 _task_runner: TaskRunner | None = None
 _path_lock_registry: PathLockRegistry | None = None
 
-def get_cache_service(settings: Settings = Depends(get_settings)):
+def get_cache_service(settings: Settings = Depends(get_settings)) -> CacheService | None:
     global _cache_service
     if _cache_service is None:
         _cache_service = CacheService(config=settings.cache_config)
     return _cache_service
 
-def get_resource_handler_service(settings: Settings = Depends(get_settings)):
+def get_resource_handler_service(settings: Settings = Depends(get_settings)) -> ResourceHandlerService | None:
     global _resource_handler_service
     if _resource_handler_service is None:
         _resource_handler_service = ResourceHandlerService(settings=settings)
     return _resource_handler_service
 ResourceHandlerServiceDep = Annotated[ResourceHandlerService, Depends(get_resource_handler_service)]
 
-def get_ffmpeg_service(settings: Settings = Depends(get_settings)):
+def get_ffmpeg_service(settings: Settings = Depends(get_settings)) -> FFmpegService | None:
     global _ffmpeg_service
     if _ffmpeg_service is None:
         _ffmpeg_service = FFmpegService(semaphore_limit=settings.ffmpeg_semaphore_limit)
     return _ffmpeg_service
 FFmpegServiceDep = Annotated[FFmpegService, Depends(get_ffmpeg_service)]
 
-def get_tag_operation_service(settings: Settings = Depends(get_settings)):
+def get_tag_operation_service(settings: Settings = Depends(get_settings)) -> TagOperationService | None:
     global _tag_operation_service
     if _tag_operation_service is None:
         _tag_operation_service = TagOperationService(settings=settings)
     return _tag_operation_service
 
-def get_series_service():
+def get_series_service() -> SeriesService | None:
     global _series_service
     if _series_service is None:
         _series_service = SeriesService()
@@ -80,7 +80,7 @@ def get_dir_metadata_service(
     settings: Settings = Depends(get_settings),
     resource_handler_service = Depends(get_resource_handler_service), 
     cache_service = Depends(get_cache_service)
-):
+) -> DirMetadataService | None:
     return DirMetadataService(
         settings=settings, 
         resource_handler_service=resource_handler_service, 
@@ -92,7 +92,7 @@ def get_thumbnail_service(
     resource_handler_service = Depends(get_resource_handler_service), 
     ffmpeg = Depends(get_ffmpeg_service),
     settings: Settings = Depends(get_settings)
-):
+) -> ThumbnailService | None:
     return ThumbnailService(
         settings=settings,
         resource_handler_service=resource_handler_service, 
@@ -104,7 +104,7 @@ def get_path_lock_registry(
     resource_handler_service = Depends(get_resource_handler_service),
     dir_metadata_service = Depends(get_dir_metadata_service),
     settings: Settings = Depends(get_settings),
-):
+) -> PathLockRegistry | None:
     """
     The registry that tells readers whether a file is spoken for by unfinished work.
 
@@ -131,7 +131,7 @@ def get_browse_file_service(
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
     path_locks = Depends(get_path_lock_registry)
-):
+) -> BrowseFileService | None:
     return BrowseFileService(
         settings=settings,
         dir_metadata_service=dir_metadata_service,
@@ -148,7 +148,7 @@ def get_batch_operation_service(
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
     series_service = Depends(get_series_service),
-):
+) -> BatchOperationService | None:
     return BatchOperationService(
         dir_metadata_service=dir_metadata_service,
         tag_operation_service=tag_operation_service,
@@ -166,7 +166,7 @@ def get_catalog_service(
     ffmpeg_service = Depends(get_ffmpeg_service),
     path_locks = Depends(get_path_lock_registry),
     series_service = Depends(get_series_service),
-):
+) -> CatalogService | None:
     return CatalogService(
         settings=settings,
         tag_operation_service=tag_operation_service,
@@ -182,7 +182,7 @@ def get_migration_service(
     dir_metadata_service=Depends(get_dir_metadata_service),
     settings: Settings = Depends(get_settings),
     series_service=Depends(get_series_service),
-):
+) -> MigrationService | None:
     global _migration_service
     if _migration_service is None:
         _migration_service = MigrationService(
@@ -193,7 +193,7 @@ def get_migration_service(
         )
     return _migration_service
 
-def get_task_runner(settings: Settings = Depends(get_settings)):
+def get_task_runner(settings: Settings = Depends(get_settings)) -> TaskRunner | None:
     global _task_runner
     if _task_runner is None:
         _task_runner = TaskRunner(max_concurrent=settings.tasks.max_concurrent)
@@ -225,7 +225,7 @@ async def init_task_runner() -> TaskRunner:
 def get_video_stream_service(
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service)
-):
+) -> VideoStreamService | None:
     return VideoStreamService(
         resourceHandlerService=resource_handler_service, 
         ffmpegService=ffmpeg_service

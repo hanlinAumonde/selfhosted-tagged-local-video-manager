@@ -47,11 +47,43 @@
           <p class="text-sm mt-1">Failed to load directories</p>
         </div>
       } @else {
+        <!-- Filter + Sort -->
+        <div class="flex items-center gap-2">
+          <div class="flex-1 flex items-center gap-1 px-2 py-1 border border-gray-200 dark:border-neutral-700 rounded
+                      focus-within:border-blue-500">
+            <mat-icon fontIcon="search" class="text-gray-400 text-base!"></mat-icon>
+            <input
+              type="text"
+              class="flex-1 bg-transparent outline-none text-sm"
+              placeholder="Filter folders"
+              [value]="dirFilter()"
+              (input)="dirFilter.set($any($event.target).value)"
+            />
+            @if (dirFilter()) {
+              <button class="flex items-center cursor-pointer bg-transparent border-none text-gray-400 hover:text-gray-600"
+                (click)="dirFilter.set('')" matTooltip="Clear">
+                <mat-icon fontIcon="close" class="text-base!"></mat-icon>
+              </button>
+            }
+          </div>
+          <button
+            class="flex items-center gap-1 px-2 py-1 text-sm rounded cursor-pointer bg-transparent
+                   hover:bg-gray-100 dark:hover:bg-neutral-700"
+            (click)="toggleSort()"
+            [matTooltip]="sortAscending() ? 'Name A → Z' : 'Name Z → A'"
+          >
+            <mat-icon [fontIcon]="sortAscending() ? 'arrow_upward' : 'arrow_downward'" class="text-base!"></mat-icon>
+            Name
+          </button>
+        </div>
+
         <div class="max-h-75 overflow-y-auto border border-gray-200 dark:border-neutral-700 rounded-lg">
-          @if (getDirItems().length === 0) {
-            <div class="text-center py-6 text-gray-400 text-sm">No subdirectories</div>
+          @if (visibleDirItems().length === 0) {
+            <div class="text-center py-6 text-gray-400 text-sm">
+              {{ dirFilter().trim() ? 'No matching folders' : 'No subdirectories' }}
+            </div>
           } @else {
-            @for (item of getDirItems(); track item.node.id) {
+            @for (item of visibleDirItems(); track item.node.id) {
               <button
                 class="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-neutral-700
                        border-b border-gray-100 dark:border-neutral-700 last:border-b-0 cursor-pointer

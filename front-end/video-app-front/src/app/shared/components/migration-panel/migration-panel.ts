@@ -1,4 +1,4 @@
-import { Component, inject, signal, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, computed, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -12,6 +12,7 @@ import { ToastService } from '../../../services/toast-service/toast.service';
 import { ToastType } from '../../models/toast.model';
 import { MigrationPanelData } from '../../models/panels.model';
 import { ConflictStrategy } from '../../models/migration.model';
+import { comparatorBySortOption } from '../../models/management.model';
 import {
   BrowseDirectoryDetail,
   MigrationPreflightDetail,
@@ -56,6 +57,16 @@ export class MigrationPanel {
     loading: true, error: null, data: null
   });
   selectedTargetDir = signal<string | null>(null);
+  dirFilter = signal('');
+  sortAscending = signal(true);
+
+  readonly visibleDirItems = computed(() => {
+    const keyword = this.dirFilter().trim().toLowerCase();
+    const dirs = this.browseContents().data?.filter(item => item.node.isDir) ?? [];
+    return dirs
+      .filter(item => !keyword || item.node.name.toLowerCase().includes(keyword))
+      .sort(comparatorBySortOption({ index: 0, order: this.sortAscending() }));
+  });
 
   // --- Step 2: Preflight Results ---
   preflightResult = signal<MigrationPreflightDetail | null>(null);
@@ -70,6 +81,8 @@ export class MigrationPanel {
 
   browseTargetDirectory(path: string[]) {
     this.browsePath.set(path);
+    // The keyword was typed against the previous listing; carrying it over would hide the new one.
+    this.dirFilter.set('');
     const relativePath = path.length > 0 ? path.join('/') : undefined;
     this.gqlService.browseDirectoryQuery(relativePath, true, false)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -96,8 +109,8 @@ export class MigrationPanel {
     this.selectedTargetDir.set(path.join('/'));
   }
 
-  getDirItems() {
-    return this.browseContents().data?.filter(item => item.node.isDir) ?? [];
+  toggleSort() {
+    this.sortAscending.update(asc => !asc);
   }
 
   // ─── Preflight ─────────────────────────────────────────────────────

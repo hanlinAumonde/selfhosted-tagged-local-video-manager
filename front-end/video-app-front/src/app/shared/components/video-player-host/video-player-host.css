@@ -1,13 +1,19 @@
-/*
-  video.js styles its markup with global class names, so this component opts out of view
-  encapsulation. Keeping the imports here rather than in styles.css is what makes them load
-  with the deferred player chunk instead of on every page.
-*/
-@import 'video.js/dist/video-js.min.css';
-@import '@videojs/themes/dist/forest/index.css';
-
 /* Stay transparent to layout: the player sizes against the caller's block. */
-app-video-player-host {
+:host {
   display: block;
   width: 100%;
+}
+
+.player-skin {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+/* Tailwind preflight gives every video `height: auto`, and a light-DOM rule beats the skin's
+   `::slotted(video) { height: 100% }` regardless of specificity. With an auto height a portrait
+   video keeps its intrinsic height and the skin's clipped container crops it, so object-fit:
+   contain never gets a box to letterbox into. */
+.player-skin video {
+  height: 100%;
 }

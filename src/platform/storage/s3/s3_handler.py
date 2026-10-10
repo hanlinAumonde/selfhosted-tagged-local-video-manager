@@ -53,7 +53,11 @@ class S3ResourceHandler(BaseResourceHandler):
                     #s3={'addressing_style': 'path'},
                     connect_timeout=5,
                     read_timeout=10,
-                    retries={'max_attempts': 3}
+                    retries={
+                        "total_max_attempts": 3,
+                        "max_attempts": 3,
+                        "mode":"standard"
+                    }
                 )
             )
             self._buckets[pseudo_name] = s3.Bucket(config.bucket)
@@ -161,7 +165,7 @@ class S3ResourceHandler(BaseResourceHandler):
                     is_directory=False,
                 ))
 
-        yield (iter(entries))
+        yield iter(entries)
 
     def get_entry(self, path: str) -> BaseFileEntry:
         """Get a single S3 object entry by its key."""
