@@ -9,3 +9,11 @@
   width: 100%;
   aspect-ratio: 16 / 9;
 }
+
+/* Tailwind preflight gives every video `height: auto`, and a light-DOM rule beats the skin's
+   `::slotted(video) { height: 100% }` regardless of specificity. With an auto height a portrait
+   video keeps its intrinsic height and the skin's clipped container crops it, so object-fit:
+   contain never gets a box to letterbox into. */
+.player-skin video {
+  height: 100%;
+}
