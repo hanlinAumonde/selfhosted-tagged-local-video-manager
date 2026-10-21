@@ -10,10 +10,13 @@ import { environment } from '../../../environments/environment';
 import {
   SortCriterion,
   ManagementRefreshState,
-  comparatorBySortOption
+  FileBrowserViewMode,
+  comparatorBySortOption,
+  isNodeLocked
 } from '../../shared/models/management.model';
 import { BottomToolbar } from '../../shared/components/bottom-toolbar/bottom-toolbar';
 import { FileBrowseTable } from '../../shared/components/file-browse-table/file-browse-table';
+import { FileBrowseGrid } from '../../shared/components/file-browse-grid/file-browse-grid';
 import { ToastService } from '../../services/toast-service/toast.service';
 import { PathHistoryService } from '../../services/path-history-service/path-history.service';
 import { VideoUpdateEventService } from '../../services/video-update-event-service/video-update-event.service';
@@ -23,11 +26,21 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { merge, Subscription } from 'rxjs';
 import { ToastType } from '../../shared/models/toast.model';
 
+/** A remembered preference only — storage may be unavailable, and the table is a fine fallback. */
+function readStoredViewMode(): FileBrowserViewMode {
+  try {
+    return localStorage.getItem(environment.VIEW_MODE_STORAGE_KEY) === 'grid' ? 'grid' : 'table';
+  } catch {
+    return 'table';
+  }
+}
+
 @Component({
   selector: 'app-file-browser',
   imports: [
     BottomToolbar,
-    FileBrowseTable
+    FileBrowseTable,
+    FileBrowseGrid
   ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './file-browser.html'
@@ -50,6 +63,7 @@ export class FileBrowser implements OnDestroy{
   currentPath = signal<string[]>([]);
   directoryContents = signal(this.gqlService.initialSignalData<BrowseDirectoryDetail>([]));
   selectedIds = signal<Set<string>>(new Set());
+  viewMode = signal<FileBrowserViewMode>(readStoredViewMode());
 
   private directorySubscription: Subscription | null = null;
 
@@ -297,7 +311,18 @@ export class FileBrowser implements OnDestroy{
 
   // ─── Directory Navigation ──────────────────────────────────────────
 
+  /**
+   * Clicking an entry either enters a directory or toggles selection. Locked files do
+   * neither: every operation reachable from a selection would be rejected by the backend.
+   */
   onClickFileBrowseNode(node: FileBrowseNode) {
+    if (isNodeLocked(node.node)) {
+      this.toastService.emitNewToast(
+        `"${node.node.name}" is being migrated and cannot be modified.`,
+        ToastType.Warning
+      );
+      return;
+    }
     if(!node.node.isDir) {
       this.toggleSelection(node.node.id);
       return;
@@ -349,15 +374,9 @@ export class FileBrowser implements OnDestroy{
   // ─── Sorting ───────────────────────────────────────────────────────
 
   toggleSort(columnIndex: number){
-    this.sortCriteria.update(criteria => {
-      if (criteria.index === columnIndex) {
-        criteria.order = !criteria.order;
-      } else {
-        criteria.index = columnIndex;
-        criteria.order = true;
-      }
-      return criteria;
-    });
+    this.sortCriteria.update(criteria => criteria.index === columnIndex
+      ? { index: columnIndex, order: !criteria.order }
+      : { index: columnIndex, order: true });
     this.sortItemsBy(this.sortCriteria(), this.directoryContents().data);
   }
 
@@ -368,6 +387,18 @@ export class FileBrowser implements OnDestroy{
     const sortComparator = comparatorBySortOption(sortCriteria);
     sortedContents.sort(sortComparator);
     this.directoryContents.set({ ...this.directoryContents(), data: sortedContents });
+  }
+
+  // ─── View Mode ─────────────────────────────────────────────────────
+
+  toggleViewMode() {
+    const next: FileBrowserViewMode = this.viewMode() === 'table' ? 'grid' : 'table';
+    this.viewMode.set(next);
+    try {
+      localStorage.setItem(environment.VIEW_MODE_STORAGE_KEY, next);
+    } catch {
+      // Not remembered across reloads; the switch itself still happened.
+    }
   }
 
   // ─── DOM Utilities ─────────────────────────────────────────────────

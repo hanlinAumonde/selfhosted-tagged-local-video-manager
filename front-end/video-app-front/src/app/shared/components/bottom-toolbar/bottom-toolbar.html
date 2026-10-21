@@ -101,7 +101,7 @@
         </div>
         }
       </div>
-      <div class="flex items-end gap-2">
+      <div class="flex items-center gap-2">
         <button
           class="px-4 py-2 bg-neutral-500 gap-2 flex items-center text-white rounded-lg
                  font-medium hover:bg-neutral-400 transition-colors"
@@ -155,6 +155,16 @@
             <span>Delete</span>
           </button>
         </mat-menu>
+        <button
+          class="p-1.5 bg-neutral-500 flex items-center text-white rounded-lg hover:bg-neutral-400 transition-colors"
+          [matTooltip]="viewMode() === 'table' ? 'Switch to thumbnail view' : 'Switch to list view'"
+          (click)="viewModeToggle.emit()"
+        >
+          <mat-icon
+            class="text-xl! w-5! h-5! leading-none"
+            [fontIcon]="viewMode() === 'table' ? 'grid_view' : 'view_list'"
+          ></mat-icon>
+        </button>
       </div>
 
     </div>

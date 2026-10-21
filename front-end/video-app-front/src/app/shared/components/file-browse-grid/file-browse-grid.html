@@ -1,0 +1,160 @@
+<div #gridElement class="w-full bg-white dark:bg-neutral-800 shadow-2xl">
+  <!-- Sort Bar -->
+  <div class="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-neutral-700
+              border-b dark:border-neutral-600 text-gray-600 dark:text-gray-300">
+    <mat-checkbox
+      [checked]="isAllSelected()"
+      [indeterminate]="hasSelection() && !isAllSelected()"
+      matTooltip="Select all videos"
+      (change)="selectAllToggle.emit()"
+    />
+    <span class="text-sm font-medium ml-1 mr-1 select-none">Sort by</span>
+    @for (option of sortOptions; track option.index) {
+      <button
+        class="flex items-center gap-1 px-3 py-1 rounded-full text-sm select-none transition-colors"
+        [class.bg-blue-600]="sortCriteria().index === option.index"
+        [class.text-white]="sortCriteria().index === option.index"
+        [class.hover:bg-gray-300]="sortCriteria().index !== option.index"
+        [class.dark:hover:bg-neutral-600]="sortCriteria().index !== option.index"
+        (click)="sort.emit(option.index)"
+      >
+        {{ option.label }}
+        @if (sortCriteria().index === option.index) {
+          <mat-icon
+            class="text-base! w-4! h-4! leading-none"
+            [fontIcon]="sortCriteria().order ? 'arrow_upward' : 'arrow_downward'"
+          ></mat-icon>
+        }
+      </button>
+    }
+    <span class="flex-1"></span>
+    <mat-icon
+      class="hover:bg-neutral-300 dark:hover:bg-neutral-600 cursor-pointer"
+      fontIcon="refresh" matTooltip="refresh"
+      (click)="refresh.emit()"></mat-icon>
+  </div>
+
+  <!-- Loading State -->
+  @if (directoryContents().loading) {
+    <div class="p-8 text-center">
+      <mat-icon class="text-4xl text-gray-400 animate-spin" fontIcon="sync"></mat-icon>
+      <p class="mt-2 text-gray-500 dark:text-gray-400">Loading...</p>
+    </div>
+  }
+
+  <!-- Error State -->
+  @else if (directoryContents().error) {
+    <div class="p-8 text-center">
+      <mat-icon class="text-4xl text-red-400" fontIcon="error_outlined"></mat-icon>
+      <p class="mt-2 text-gray-500 dark:text-gray-400">Failed to load directory</p>
+    </div>
+  }
+
+  <!-- Empty State -->
+  @else if (!directoryContents().data || directoryContents().data!.length === 0) {
+    <div class="p-8 text-center">
+      <mat-icon class="text-4xl text-gray-400" fontIcon="folder_open"></mat-icon>
+      <p class="mt-2 text-gray-500 dark:text-gray-400">No items in this directory</p>
+    </div>
+  }
+
+  <!-- Content -->
+  @else {
+    <!-- Six per row on a desktop-width view; fewer as the view narrows so tiles stay legible. -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4 p-4 dark:text-gray-200">
+      @for (item of directoryContents().data; track item.node.id) {
+        <app-file-node-menu
+          #nodeMenu
+          [item]="item"
+          [currentPath]="currentPath()"
+          (refreshDirectoryMeta)="refreshDirectoryMeta.emit($event)"
+          (migrationResult)="migrationResult.emit($event)"
+          (batchSyncDirectoryResult)="batchSyncDirectoryResult.emit($event)"
+        />
+        <div
+          class="group relative flex flex-col p-2 rounded-lg border-2 transition-colors select-none"
+          [class.border-transparent]="!isSelected(item.node.id)"
+          [class.hover:bg-gray-100]="!isSelected(item.node.id)"
+          [class.dark:hover:bg-neutral-700]="!isSelected(item.node.id)"
+          [class.border-blue-500]="isSelected(item.node.id)"
+          [class.bg-blue-50]="isSelected(item.node.id)"
+          [class.dark:bg-blue-950]="isSelected(item.node.id)"
+          [class.cursor-pointer]="!isLocked(item.node)"
+          [class.cursor-not-allowed]="isLocked(item.node)"
+          [class.opacity-60]="isLocked(item.node)"
+          [matTooltip]="tooltipFor(item.node)"
+          matTooltipClass="file-node-tooltip"
+          [matTooltipShowDelay]="400"
+          [matContextMenuTriggerFor]="nodeMenu.menu()!"
+          (click)="nodeClick.emit(item)"
+        >
+          <!-- Thumbnail -->
+          <div class="relative w-full aspect-video rounded-md overflow-hidden bg-gray-100 dark:bg-neutral-700
+                      flex items-center justify-center"
+               [class.grayscale]="isLocked(item.node)">
+            @if (item.node.isDir) {
+              <img src="foldericon.png" alt="folder" class="w-1/2 h-1/2 object-contain" />
+            } @else {
+              @defer (on viewport) {
+                <app-file-thumbnail [videoId]="item.node.id" [alt]="item.node.name" />
+              } @placeholder {
+                <img src="videoicon.png" alt="video" class="w-full h-full object-contain p-6" />
+              }
+
+              @if (isLocked(item.node)) {
+                <div class="absolute inset-0 flex items-center justify-center bg-black/45">
+                  <span class="flex items-center gap-1 rounded-full bg-black/75 px-2 py-0.5 text-xs font-semibold text-white">
+                    <mat-icon class="text-sm! w-3.5! h-3.5! leading-none animate-spin" fontIcon="sync"></mat-icon>
+                    Migrating
+                  </span>
+                </div>
+              }
+
+              <!-- Only a search result has one: it says which sub-directory it came from. -->
+              @if (item.node.relativePath) {
+                <span
+                  class="absolute bottom-1 left-1 right-1 w-fit max-w-[calc(100%-0.5rem)] inline-flex items-center gap-1
+                         rounded px-1.5 py-0.5 text-xs font-mono truncate bg-black/65 text-gray-100"
+                  [matTooltip]="'In ' + nodeDirectory(item.node)"
+                >
+                  <mat-icon class="text-sm! w-3.5! h-3.5! leading-none shrink-0" fontIcon="folder"></mat-icon>
+                  <span class="truncate">{{ item.node.relativePath }}</span>
+                </span>
+              }
+            }
+          </div>
+
+          <!-- Selection checkbox: always visible once selected, otherwise on hover. -->
+          @if (!item.node.isDir) {
+            <div
+              class="absolute top-1 left-1 rounded bg-white/85 dark:bg-neutral-800/85 transition-opacity"
+              [class.opacity-0]="!isSelected(item.node.id)"
+              [class.group-hover:opacity-100]="!isSelected(item.node.id)"
+              (click)="$event.stopPropagation()"
+            >
+              <mat-checkbox
+                [checked]="isSelected(item.node.id)"
+                [disabled]="isLocked(item.node)"
+                (change)="selectionToggle.emit(item.node.id)"
+              />
+            </div>
+          }
+
+          <!-- Name -->
+          <div class="flex items-start gap-1.5 mt-2 min-w-0">
+            <!-- A folder's thumbnail already is the folder icon. -->
+            @if (!item.node.isDir) {
+              <img src="videoicon.png" alt="video" class="w-4 h-4 mt-0.5 shrink-0" />
+            }
+            <span
+              class="text-sm leading-snug line-clamp-2 break-all"
+              [class.text-blue-600]="item.node.isDir"
+              [class.dark:text-blue-400]="item.node.isDir"
+              [class.font-medium]="item.node.isDir"
+            >{{ item.node.name }}</span>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</div>

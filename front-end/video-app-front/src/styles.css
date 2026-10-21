@@ -103,3 +103,11 @@ html.dark body {
 .animate-toast-exit {
   animation: toastExit 0.3s ease-in forwards;
 }
+
+/* File browser thumbnail tooltip: one fact per line, read top to bottom. The tooltip lives
+   in the overlay container, outside any component's view, so this has to be global. */
+.file-node-tooltip .mat-mdc-tooltip-surface {
+  white-space: pre-line;
+  text-align: left;
+  max-width: 320px;
+}

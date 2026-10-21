@@ -18,6 +18,7 @@ import {
   NewFolderPanelData,
   SearchPanelData
 } from '../../models/panels.model';
+import { FileBrowserViewMode } from '../../models/management.model';
 
 @Component({
   selector: 'app-bottom-toolbar',
@@ -42,12 +43,14 @@ export class BottomToolbar {
   isSearching = input<boolean>(false);
   /** What was searched for, one chip per field that was filled in. */
   searchSummary = input<string[]>([]);
+  viewMode = input<FileBrowserViewMode>('table');
 
   batchOperationResult = output<boolean>();
   createFolderResult = output<boolean>();
   navigateToPath = output<string[]>();
   searchRequested = output<DirectorySearchCriteria>();
   exitSearch = output<void>();
+  viewModeToggle = output<void>();
 
   paths = computed(() => {
     return ["Root", ...this.currentPath()];
