@@ -327,6 +327,7 @@ export class FileBrowser implements OnDestroy{
       this.toggleSelection(node.node.id);
       return;
     };
+    this.rememberCurrentScroll();
     // Entering a directory leaves the result set behind — the listing effect below takes
     // over from here.
     this.searchCriteria.set(null);
@@ -336,10 +337,18 @@ export class FileBrowser implements OnDestroy{
     this.pathHistoryService.pushNewPath(this.currentPath());
   }
 
+  /** Back, forward and breadcrumb jumps all return somewhere already seen, so restore its scroll. */
   navigateToPath(path: string[]) {
+    this.rememberCurrentScroll();
     this.searchCriteria.set(null);
-    this.setRefreshState(0, this.sortCriteria().index, this.sortCriteria().order, path);
+    this.setRefreshState(this.pathHistoryService.scrollOf(path), this.sortCriteria().index, this.sortCriteria().order, path);
     this.currentPath.set(path);
+  }
+
+  private rememberCurrentScroll() {
+    // A results list's offset says nothing about where the listing itself was left.
+    if (this.isSearching()) return;
+    this.pathHistoryService.rememberScroll(this.currentPath(), this.getParentScrollContainer()?.scrollTop ?? 0);
   }
 
   // ─── Selection ─────────────────────────────────────────────────────
