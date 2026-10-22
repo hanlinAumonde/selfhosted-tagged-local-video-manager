@@ -12,6 +12,7 @@ export const environment = {
     refreshKey: "_refresh_key",
     scrollKey: "_scroll_position",
     videoUpdateChannel: "video-updates",
+    VIEW_MODE_STORAGE_KEY: "file-browser-view-mode",
     containerIds: {
         rootMainContainerId: "root-main-container"
     },

@@ -18,24 +18,10 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
 import { ResultState, BrowsedVideo, FileBrowseNode } from '../../models/GQL-result.model';
-import { SortCriterion } from '../../models/management.model';
+import { SortCriterion, formatFileSize, isNodeLocked, nodeDirectory } from '../../models/management.model';
 import { environment } from '../../../../environments/environment';
-import { ToastService } from '../../../services/toast-service/toast.service';
-import { ToastType } from '../../models/toast.model';
-import { MatDialog } from '@angular/material/dialog';
-import { BatchOperationPanel } from '../batch-operation-panel/batch-operation-panel';
-import { DeleteCheckPanel } from '../delete-check-panel/delete-check-panel';
-import {
-  DeleteCheckPanelData,
-  DeleteType,
-  MigrationPanelData,
-  VideoEditPanelData,
-  VideoEditPanelMode
-} from '../../models/panels.model';
-import { VideoEditPanel } from '../video-edit-panel/video-edit-panel';
-import { MigrationPanel } from '../migration-panel/migration-panel';
+import { FileNodeMenu } from '../file-node-menu/file-node-menu';
 
 @Component({
   selector: 'app-file-browse-table',
@@ -45,7 +31,7 @@ import { MigrationPanel } from '../migration-panel/migration-panel';
     MatCheckboxModule,
     MatMenuModule,
     MatTooltipModule,
-    RouterLink
+    FileNodeMenu
   ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './file-browse-table.html'
@@ -64,8 +50,6 @@ export class FileBrowseTable {
   nodeClick = output<FileBrowseNode>();
   selectionToggle = output<string>();
   selectAllToggle = output<void>();
-  editVideoResult = output<boolean>();
-  deleteVideoResult = output<boolean>();
   migrationResult = output<boolean>();
   batchSyncDirectoryResult = output<boolean>();
   refreshDirectoryMeta = output<FileBrowseNode>();
@@ -73,8 +57,6 @@ export class FileBrowseTable {
 
   tableElement = viewChild<ElementRef<HTMLTableElement>>('tableElement');
 
-  private toastService = inject(ToastService);
-  private dialog = inject(MatDialog);
   private resizeObserver: ResizeObserver | null = null;
   private destroyRef = inject(DestroyRef);
 
@@ -208,123 +190,22 @@ export class FileBrowseTable {
     });
   }
 
-  openEditPanel(video: BrowsedVideo) {
-    this.dialog.open(VideoEditPanel, {
-      width: '500px',
-      data: {
-        mode: 'full' as VideoEditPanelMode,
-        video: video
-      } as VideoEditPanelData
-    });
-  }
-
-  deleteVideo(video: BrowsedVideo) {
-    this.dialog.open(DeleteCheckPanel, {
-      width: '400px',
-      data: {
-        deleteType: DeleteType.Single,
-        videoIds: new Set<string>([video.id])
-       } as DeleteCheckPanelData
-    });
-  }
-
-  deleteVideosInDirectory(dirPath: string) {
-    this.dialog.open(DeleteCheckPanel, {
-      width: '400px',
-      data: {
-        deleteType: DeleteType.Directory,
-        directoryPath: this.currentPath().join('/') + '/' + dirPath
-       } as DeleteCheckPanelData
-    });
-  }
-
-  openMigrationPanel(video: BrowsedVideo) {
-    const data: MigrationPanelData = {
-      sourceVideoId: video.id,
-      sourceVideoName: video.name,
-      sourceFileSize: video.size,
-      sourceCurrentDir: this.nodeDirectory(video) || '/',
-    };
-
-    const dialogRef = this.dialog.open(MigrationPanel, {
-      width: '560px',
-      data,
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      this.migrationResult.emit(!!result);
-    });
-  }
-
-  openBatchOperationPanel(dirName:string) {
-    if(!dirName) return;
-    
-    const selectedDirectoryPath = this.currentPath().length > 0 ?
-      this.currentPath().join('/') + '/' + dirName : dirName;
-
-    const data = { mode: 'directory', selectedDirectoryPath: selectedDirectoryPath };
-    
-    this.toastService.clearAllToasts();
-
-    const dialogRef = this.dialog.open(BatchOperationPanel, {
-      width: '500px',
-      data: data,
-      disableClose: true,
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      this.batchSyncDirectoryResult.emit(result? true : false);
-    });
-  }
-
   // --- Template Helpers ---
 
   isSelected(id: string): boolean {
     return this.selectedIds().has(id);
   }
 
-  /**
-   * The directory this row actually sits in, in DB path format.
-   *
-   * For a listing that is the directory on screen. A search result may have come from any
-   * depth below it, and carries that offset in `relativePath` — a row's own location is
-   * the only thing an operation on it may be told about.
-   */
   nodeDirectory(node: BrowsedVideo): string {
-    return [this.currentPath().join('/'), node.relativePath]
-      .filter(part => !!part)
-      .join('/');
+    return nodeDirectory(this.currentPath(), node);
   }
 
-  /**
-   * Whether a migration task currently holds this file. Directories are never locked —
-   * a migration targets a single file.
-   */
   isLocked(node: BrowsedVideo): boolean {
-    return !node.isDir && node.isLocked;
-  }
-
-  /**
-   * Row click either enters a directory or toggles selection. Locked files do neither:
-   * every operation reachable from a selection would be rejected by the backend anyway.
-   */
-  onRowClick(item: FileBrowseNode) {
-    if (this.isLocked(item.node)) {
-      this.toastService.emitNewToast(
-        `"${item.node.name}" is being migrated and cannot be modified.`,
-        ToastType.Warning
-      );
-      return;
-    }
-    this.nodeClick.emit(item);
+    return isNodeLocked(node);
   }
 
   formatSize(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    return formatFileSize(bytes);
   }
 
   formatDate(timestamp: number): string {
@@ -343,9 +224,5 @@ export class FileBrowseTable {
 
   getAllRemainingTags(video: BrowsedVideo): string {
     return video.tags?.slice(this.visibleTagsCount()).map(t => t.name).join(',  ') ?? '';
-  }
-
-  videoPage(video: BrowsedVideo) {
-    return [environment.videopage_api, video.id];
   }
 }

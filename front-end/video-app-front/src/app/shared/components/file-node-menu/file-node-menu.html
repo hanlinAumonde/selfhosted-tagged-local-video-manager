@@ -1,0 +1,42 @@
+<mat-menu>
+  @if (item().node.isDir) {
+    <button mat-menu-item (click)="openBatchOperationPanel(item().node.name)">
+      <mat-icon fontIcon="backup"></mat-icon>
+      <span>Sync videos</span>
+    </button>
+    <button mat-menu-item (click)="refreshDirectoryMeta.emit(item())">
+      <mat-icon fontIcon="refresh"></mat-icon>
+      <span>Refresh Metadata</span>
+    </button>
+    <button mat-menu-item (click)="deleteVideosInDirectory(item().node.name)">
+      <mat-icon fontIcon="delete"></mat-icon>
+      <span>Delete all</span>
+    </button>
+  } @else {
+    <!-- Every file operation is unavailable while a migration holds the file.
+         The backend rejects them too; disabling here just avoids a pointless
+         round trip and a confusing error. -->
+    <button mat-menu-item [disabled]="isLocked(item().node)">
+      <a
+        [routerLink]="isLocked(item().node) ? null : videoPage(item().node)"
+        target="_blank"
+        class="flex items-center"
+      >
+        <mat-icon fontIcon="play_circle"></mat-icon>
+        <span>Play Video</span>
+      </a>
+    </button>
+    <button mat-menu-item [disabled]="isLocked(item().node)" (click)="openEditPanel(item().node)">
+      <mat-icon fontIcon="edit"></mat-icon>
+      <span>Edit</span>
+    </button>
+    <button mat-menu-item [disabled]="isLocked(item().node)" (click)="openMigrationPanel(item().node)">
+      <mat-icon fontIcon="drive_file_move"></mat-icon>
+      <span>Migrate</span>
+    </button>
+    <button mat-menu-item [disabled]="isLocked(item().node)" (click)="deleteVideo(item().node)" class="text-red-600">
+      <mat-icon fontIcon="delete"></mat-icon>
+      <span>Delete</span>
+    </button>
+  }
+</mat-menu>

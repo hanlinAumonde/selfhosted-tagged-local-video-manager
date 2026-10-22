@@ -237,16 +237,28 @@ export class Search {
     });
   }
 
+  /*
+    Folds the typed title/author into the params, so changing tags or sort searches with
+    what is in the bar instead of silently reverting it. An invalid draft is left out (and
+    left on screen): the search still runs on the last committed text.
+  */
+  private withDraft(params: SearchPageParam): SearchPageParam {
+    if (this.searchForm().invalid()) return params;
+    const draft = this.searchModel();
+    return { ...params, title: draft.title, author: draft.author };
+  }
+
+  /** Commits params without resetting the bar, which may hold an invalid draft worth keeping. */
+  private commitParams(params: SearchPageParam): boolean {
+    const previous = this.searchParams();
+    this.searchParams.set(params);
+    return previous.title !== params.title || previous.author !== params.author;
+  }
+
   onSearch() {
     if (this.searchForm().invalid()) return;
 
-    const draft = this.searchModel();
-    const newParams: SearchPageParam = {
-      ...this.searchParams(),
-      title: draft.title,
-      author: draft.author
-    };
-    this.updateSearchParamsAndForm(newParams);
+    this.updateSearchParamsAndForm(this.withDraft(this.searchParams()));
 
     if (!this.hasSearched()) {
       this.hasSearched.set(true);
@@ -276,10 +288,9 @@ export class Search {
   }
 
   onSortChange(sortBy: VideoSortOption) {
-    const newParams: SearchPageParam = { ...this.searchParams(), sortBy };
-    this.updateSearchParamsAndForm(newParams);
-    //when sort by loved, the total count may change
-    if(sortBy === VideoSortOption.Loved) {
+    const textChanged = this.commitParams(this.withDraft({ ...this.searchParams(), sortBy }));
+    //when sort by loved or the text changed, the total count may change
+    if(sortBy === VideoSortOption.Loved || textChanged) {
       this.navigateToPage(1);
     }
   }
@@ -295,8 +306,7 @@ export class Search {
 
     dialogRef.afterClosed().subscribe((result: string[] | undefined) => {
       if (result !== undefined) {
-        const newParams: SearchPageParam = { ...this.searchParams(), tags: result };
-        this.updateSearchParamsAndForm(newParams);
+        this.commitParams(this.withDraft({ ...this.searchParams(), tags: result }));
         this.navigateToPage(1);
       }
     });

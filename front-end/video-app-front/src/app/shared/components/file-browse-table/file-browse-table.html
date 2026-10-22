@@ -112,48 +112,14 @@
       <!-- Content -->
       @else {
         @for (item of directoryContents().data; track item.node.id) {
-          <mat-menu #operateMenu="matMenu">
-            @if(item.node.isDir){
-              <button mat-menu-item (click)="openBatchOperationPanel(item.node.name)">
-                <mat-icon fontIcon="backup"></mat-icon>
-                <span>Sync videos</span>
-              </button>
-              <button mat-menu-item (click)="refreshDirectoryMeta.emit(item)">
-                <mat-icon fontIcon="refresh"></mat-icon>
-                <span>Refresh Metadata</span>
-              </button>
-              <button mat-menu-item (click)="deleteVideosInDirectory(item.node.name)">
-                <mat-icon fontIcon="delete"></mat-icon>
-                <span>Delete all</span>
-              </button>
-            }@else{
-              <!-- Every file operation is unavailable while a migration holds the file.
-                   The backend rejects them too; disabling here just avoids a pointless
-                   round trip and a confusing error. -->
-              <button mat-menu-item [disabled]="isLocked(item.node)">
-                <a
-                  [routerLink]="isLocked(item.node) ? null : videoPage(item.node)"
-                  target="_blank"
-                  class="flex items-center"
-                >
-                  <mat-icon fontIcon="play_circle"></mat-icon>
-                  <span>Play Video</span>
-                </a>
-              </button>
-              <button mat-menu-item [disabled]="isLocked(item.node)" (click)="openEditPanel(item.node)">
-                <mat-icon fontIcon="edit"></mat-icon>
-                <span>Edit</span>
-              </button>
-              <button mat-menu-item [disabled]="isLocked(item.node)" (click)="openMigrationPanel(item.node)">
-                <mat-icon fontIcon="drive_file_move"></mat-icon>
-                <span>Migrate</span>
-              </button>
-              <button mat-menu-item [disabled]="isLocked(item.node)" (click)="deleteVideo(item.node)" class="text-red-600">
-                <mat-icon fontIcon="delete"></mat-icon>
-                <span>Delete</span>
-              </button>
-            }
-          </mat-menu>
+          <app-file-node-menu
+            #nodeMenu
+            [item]="item"
+            [currentPath]="currentPath()"
+            (refreshDirectoryMeta)="refreshDirectoryMeta.emit($event)"
+            (migrationResult)="migrationResult.emit($event)"
+            (batchSyncDirectoryResult)="batchSyncDirectoryResult.emit($event)"
+          />
           <tr
             class="flex w-full border-b dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-700"
             [class.bg-blue-50]="isSelected(item.node.id)"
@@ -161,8 +127,8 @@
             [class.cursor-pointer]="item.node.isDir"
             [class.cursor-not-allowed]="isLocked(item.node)"
             [class.opacity-55]="isLocked(item.node)"
-            [matContextMenuTriggerFor]="operateMenu"
-            (click)="onRowClick(item)"
+            [matContextMenuTriggerFor]="nodeMenu.menu()!"
+            (click)="nodeClick.emit(item)"
           >
             <!-- Checkbox -->
             <td class="w-12 shrink-0 px-4 py-3 flex items-center justify-center">
@@ -293,7 +259,7 @@
             <td class="w-14 shrink-0 px-4 py-3 flex items-center justify-center">
               <button
                 mat-icon-button
-                [matMenuTriggerFor]="operateMenu"
+                [matMenuTriggerFor]="nodeMenu.menu()!"
                 (click)="$event.stopPropagation()"
               >
                 <mat-icon fontIcon="more_vert"></mat-icon>
