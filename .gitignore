@@ -18,3 +18,5 @@ logs/
 
 mongodb-data/
 rustfs_data/
+# Environment (copy .env.example)
+.env

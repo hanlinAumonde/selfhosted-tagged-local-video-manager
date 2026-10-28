@@ -2,8 +2,11 @@ ROOT_PATH: $ROOT_PATH|
 
 resource_paths:
   Local-resource:
-    Resource-1: host_path_1
-    Resource-2: host_path_2
+    # Host paths live in .env so docker-compose.yml can mount the same directories.
+    # E.g. :
+    Resource-1: $LOCAL_RESOURCE_1
+    Resource-2: $LOCAL_RESOURCE_2
+    Resource-3: $LOCAL_RESOURCE_3
   # it has to keep the same names as the ones in handler_config
   S3-resource:
     Resource-1: /
@@ -15,8 +18,8 @@ handler_config:
     mounts:
       Resource-1:
         endpoint_url: $S3_RESOURCE_1_ENDPOINT_URL|http://localhost:9000
-        access_key: $S3_RESOURCE_1_ACCESS_KEY|rustfsadmin
-        secret_key: $S3_RESOURCE_1_SECRET_KEY|rustfsadmin
+        access_key: $S3_RESOURCE_1_ACCESS_KEY
+        secret_key: $S3_RESOURCE_1_SECRET_KEY
         bucket: $S3_RESOURCE_1_BUCKET|video-app
         region: $S3_RESOURCE_1_REGION|us-east-1
 
@@ -85,5 +88,5 @@ mongo:
   host: $MONGO_HOST|localhost
   port: $MONGO_PORT|27017
   database: $MONGO_DATABASE|video_tag_db
-  username: $MONGO_USERNAME|exampleUser001
-  password: $MONGO_PASSWORD|examplePassword
+  username: $MONGO_USERNAME
+  password: $MONGO_PASSWORD

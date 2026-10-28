@@ -169,8 +169,9 @@ _settings : Settings | None = None
 def init_settings():
     global _settings
     if _settings is None:
+        import os
         from envyaml import EnvYAML
-        raw_settings = dict(EnvYAML("config.yaml"))
+        raw_settings = dict(EnvYAML("config.yaml", **os.environ))
         _settings = Settings.model_validate(raw_settings)
     return _settings
 
