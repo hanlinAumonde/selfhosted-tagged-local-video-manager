@@ -156,27 +156,26 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### 3. 配置后端
 
-编辑 `config.yaml`，它使用 [envyaml](https://github.com/thesimj/envyaml) 的 `$ENV_VAR|default_value` 语法：
+和机器相关的值与密钥统一放在一个 `.env` 文件里，后端和 Docker Compose 读的是同一份：
 
-```yaml
-# 本地开发留空；Docker 通过环境变量注入
-ROOT_PATH: $ROOT_PATH|
-
-# 视频资源路径（分类 -> pseudo_name -> 宿主机路径）
-resource_paths:
-  Local-resource:
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
-
-mongo:
-  host: $MONGO_HOST|localhost
-  port: $MONGO_PORT|27017
-  database: $MONGO_DATABASE|video_tag_db
-  username: $MONGO_USERNAME|          # 无鉴权时留空
-  password: $MONGO_PASSWORD|
+```bash
+cp .env.example .env
 ```
 
-确保 MongoDB 正在运行——本地安装或 `docker-compose.yml` 里的容器都可以。若开启鉴权，需要一个在 `video_tag_db` 上有 CRUD、集合和索引权限的用户；不开启则无需。
+然后填写，至少要填视频目录和各项凭据：
+
+```bash
+LOCAL_RESOURCE_1=/your/video/path1
+LOCAL_RESOURCE_2=/your/video/path2
+LOCAL_RESOURCE_3=/your/video/path3
+MONGO_USERNAME=...
+MONGO_PASSWORD=...
+REDIS_URL=redis://localhost:6379/0
+```
+
+`config.yaml` 用 [envyaml](https://github.com/thesimj/envyaml) 语法引用这些变量：`$VAR|default` 缺省时回落到默认值，裸的 `$VAR` 是必填项，缺了后端拒绝启动。真实环境变量优先于 `.env`。`.env` 已被 git 忽略，`.env.example` 列出并说明了全部变量。
+
+确保 MongoDB 和 Redis 正在运行——本地安装或 `docker-compose.yml` 里的容器都可以。若开启鉴权，需要一个在 `video_tag_db` 上有 CRUD、集合和索引权限的用户；不开启则无需。
 
 完整选项（含 S3 存储与缩略图持久化）见 [配置参考](#配置参考)。
 
@@ -226,34 +225,13 @@ Docker Compose 编排了 4 个服务：Angular 前端（Nginx）、FastAPI 后�
 
 ### 2. 映射视频目录
 
-编辑 `docker-compose.yml`，把 backend 的 volumes 指向你的视频库。容器内路径必须写成 `/app/resources/<分类>/<PseudoName>`：
+和本地开发一样，从 `.env.example` 生成 `.env`。Compose 读的是同一份文件：`LOCAL_RESOURCE_n` 成为 backend 的卷挂载（`/app/resources/Local-resource/Resource-n`），凭据同时配置 MongoDB、RustFS 和后端，`REDIS_MAXMEMORY` 设定 Redis 容器的内存上限。
 
-```yaml
-backend:
-  volumes:
-    - ./logs:/app/logs
-    - /your/video/path1:/app/resources/Local-resource/Resource-1
-    - /your/video/path2:/app/resources/Local-resource/Resource-2
-  environment:
-    - ROOT_PATH=/app/resources
-    - MONGO_HOST=mongodb
-    # 可选的 S3 存储——为 Docker 网络覆盖 config.yaml 的默认值
-    # - S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000
-    # - S3_RESOURCE_1_ACCESS_KEY=rustfsadmin
-    # - S3_RESOURCE_1_SECRET_KEY=rustfsadmin
-    # - S3_RESOURCE_1_BUCKET=video-app
-```
+只在 compose 网络里才成立的地址（`MONGO_HOST=mongodb`、`REDIS_URL=redis://redis:6379/0`、`S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000`）以及 `ROOT_PATH=/app/resources` 写在 `docker-compose.yml` 里，会覆盖 `.env` 中的值，所以 `.env` 保留的是本地开发用的宿主机侧取值。
 
-在 `config.yaml` 里声明同样的分类：
-
-```yaml
-resource_paths:
-  Local-resource:
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
-```
-
-> 要使用内置的 RustFS 服务，把上面的 S3 环境变量连同 `config.yaml` 里的 `handler_config` 和 `thumbnail_config` 一起取消注释。
+> 新增一个挂载点需要改三处：`.env` 加一行，`config.yaml` 的 `resource_paths` 加一行，`docker-compose.yml` 加一个卷。
+>
+> `mongo-init.js` 只在 MongoDB 初始化一个**空的**数据目录时，用 `MONGO_DATABASE` / `MONGO_USERNAME` / `MONGO_PASSWORD` 创建应用用户。之后再改这几个值，需要自己去 MongoDB 里更新用户。
 
 ### 3. 启动
 
@@ -302,9 +280,10 @@ docker image prune -f
 ```
 video-app/
 ├── main.py                          # 后端入口（localhost:12000）
-├── config.yaml                      # 全局配置（envyaml 语法）
+├── config.yaml                      # 全局配置（envyaml 语法，取值来自 .env）
+├── .env.example                     # 全部环境变量及说明，复制为 .env 使用
 ├── Dockerfile                       # 后端镜像构建
-├── docker-compose.yml               # 前端 + 后端 + MongoDB + RustFS
+├── docker-compose.yml               # 前端 + 后端 + MongoDB + Redis + RustFS
 ├── pyproject.toml                   # 项目依赖与元数据
 │
 ├── src/
@@ -415,7 +394,7 @@ video-app/
 
 ## 配置参考
 
-`config.yaml` 使用 [envyaml](https://github.com/thesimj/envyaml) 语法：`$ENV_VAR|default_value`。
+`config.yaml` 使用 [envyaml](https://github.com/thesimj/envyaml) 语法：`$VAR|default` 缺省时回落到默认值，裸的 `$VAR` 为必填。取值来自环境变量或 `.env`（环境变量优先），完整列表见 `.env.example`。
 
 ```yaml
 # 容器挂载基础路径（Docker 通过环境变量注入，本地开发留空）
@@ -424,8 +403,8 @@ ROOT_PATH: $ROOT_PATH|
 # 视频资源路径映射（分类 -> pseudo_name -> 宿主机路径）
 resource_paths:
   Local-resource:                             # 本地文件系统分类
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
+    Resource-1: $LOCAL_RESOURCE_1             # 宿主机路径写在 .env 里
+    Resource-2: $LOCAL_RESOURCE_2
   # S3-resource:                              # S3 兼容存储分类
   #   Resource-1: /                           # S3 用不到宿主机路径
 
@@ -437,8 +416,8 @@ resource_paths:
 #     mounts:
 #       Resource-1:
 #         endpoint_url: $S3_RESOURCE_1_ENDPOINT_URL|http://localhost:9000
-#         access_key: $S3_RESOURCE_1_ACCESS_KEY|admin
-#         secret_key: $S3_RESOURCE_1_SECRET_KEY|admin
+#         access_key: $S3_RESOURCE_1_ACCESS_KEY      # 必填，来自 .env
+#         secret_key: $S3_RESOURCE_1_SECRET_KEY
 #         bucket: $S3_RESOURCE_1_BUCKET|video-app
 #         region: $S3_RESOURCE_1_REGION|us-east-1
 
@@ -449,9 +428,15 @@ resource_paths:
 #   storage_pseudo_name: Resource-1
 
 cache_config:
-  max_size: 2048                 # 最大缓存条目数
-  ttl: 300                       # 缓存过期时间（秒）
-  cache_type: cachetools
+  cache_type: redis              # redis | cachetools（进程内）
+  key_prefix: video-app
+  ttl:                           # 按用途分别设置的秒数，由各调用方写入时传入
+    dir_metadata: 300
+  redis:
+    url: $REDIS_URL|redis://localhost:6379/0
+    socket_timeout: 1.0          # Redis 不可达时降级为未命中
+  cachetools:
+    max_size: 3000               # 最大条目数
 
 # 实际生效值为 max(ffmpeg_semaphore_limit, cpu_count // 2)
 ffmpeg_semaphore_limit: 4
@@ -499,8 +484,8 @@ mongo:
   host: $MONGO_HOST|localhost
   port: $MONGO_PORT|27017
   database: $MONGO_DATABASE|video_tag_db
-  username: $MONGO_USERNAME|
-  password: $MONGO_PASSWORD|
+  username: $MONGO_USERNAME      # 必填，来自 .env
+  password: $MONGO_PASSWORD
 ```
 
 ### 前端环境配置

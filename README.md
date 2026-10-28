@@ -156,27 +156,26 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ### 3. Configure the backend
 
-Edit `config.yaml`. It uses [envyaml](https://github.com/thesimj/envyaml) syntax — `$ENV_VAR|default_value`:
+Machine-specific values and secrets live in a single `.env` file, read by both the backend and Docker Compose:
 
-```yaml
-# Leave empty for local development; Docker sets it via environment variable
-ROOT_PATH: $ROOT_PATH|
-
-# Video resource paths (category -> pseudo_name -> host path)
-resource_paths:
-  Local-resource:
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
-
-mongo:
-  host: $MONGO_HOST|localhost
-  port: $MONGO_PORT|27017
-  database: $MONGO_DATABASE|video_tag_db
-  username: $MONGO_USERNAME|          # leave empty if auth is disabled
-  password: $MONGO_PASSWORD|
+```bash
+cp .env.example .env
 ```
 
-Make sure MongoDB is running — either a local installation or the container from `docker-compose.yml`. A user with CRUD, collection and index permissions on `video_tag_db` is optional if auth is disabled.
+Then fill it in — at least the video directories and the credentials:
+
+```bash
+LOCAL_RESOURCE_1=/your/video/path1
+LOCAL_RESOURCE_2=/your/video/path2
+LOCAL_RESOURCE_3=/your/video/path3
+MONGO_USERNAME=...
+MONGO_PASSWORD=...
+REDIS_URL=redis://localhost:6379/0
+```
+
+`config.yaml` references these with [envyaml](https://github.com/thesimj/envyaml) syntax: `$VAR|default` falls back to the default, a bare `$VAR` is required and the backend refuses to start without it. A variable set in the real environment beats `.env`. `.env` is git-ignored; `.env.example` documents every variable.
+
+Make sure MongoDB and Redis are running — either a local installation or the container from `docker-compose.yml`. A user with CRUD, collection and index permissions on `video_tag_db` is optional if auth is disabled.
 
 See [Configuration Reference](#configuration-reference) for every option, including S3 storage and thumbnail persistence.
 
@@ -226,34 +225,13 @@ Docker Compose orchestrates four services: the Angular frontend (Nginx), the Fas
 
 ### 2. Map your video directories
 
-Edit `docker-compose.yml` and point the backend volumes at your library. The container path must read `/app/resources/<Category>/<PseudoName>`:
+Create `.env` from `.env.example` as in local development. Compose reads the same file: `LOCAL_RESOURCE_n` become the backend's volume mounts (`/app/resources/Local-resource/Resource-n`), the credentials configure MongoDB, RustFS and the backend, and `REDIS_MAXMEMORY` caps the Redis container.
 
-```yaml
-backend:
-  volumes:
-    - ./logs:/app/logs
-    - /your/video/path1:/app/resources/Local-resource/Resource-1
-    - /your/video/path2:/app/resources/Local-resource/Resource-2
-  environment:
-    - ROOT_PATH=/app/resources
-    - MONGO_HOST=mongodb
-    # Optional S3 storage — overrides config.yaml for Docker networking
-    # - S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000
-    # - S3_RESOURCE_1_ACCESS_KEY=rustfsadmin
-    # - S3_RESOURCE_1_SECRET_KEY=rustfsadmin
-    # - S3_RESOURCE_1_BUCKET=video-app
-```
+Addresses that only exist inside the compose network (`MONGO_HOST=mongodb`, `REDIS_URL=redis://redis:6379/0`, `S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000`) and `ROOT_PATH=/app/resources` are set in `docker-compose.yml` and override `.env`, so `.env` keeps the host-side values for local development.
 
-Declare the same categories in `config.yaml`:
-
-```yaml
-resource_paths:
-  Local-resource:
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
-```
-
-> To use the bundled RustFS service, uncomment the S3 environment variables above along with the `handler_config` and `thumbnail_config` sections in `config.yaml`.
+> Adding a mount means one line in `.env`, one in `config.yaml`'s `resource_paths`, and one volume in `docker-compose.yml`.
+>
+> `mongo-init.js` creates the app user from `MONGO_DATABASE` / `MONGO_USERNAME` / `MONGO_PASSWORD` only when MongoDB initialises an **empty** data directory; changing them later means updating the user in MongoDB yourself.
 
 ### 3. Start
 
@@ -302,9 +280,10 @@ docker image prune -f
 ```
 video-app/
 ├── main.py                          # Backend entry (localhost:12000)
-├── config.yaml                      # Configuration (envyaml syntax)
+├── config.yaml                      # Configuration (envyaml syntax, values from .env)
+├── .env.example                     # Every environment variable, documented; copy to .env
 ├── Dockerfile                       # Backend image
-├── docker-compose.yml               # frontend + backend + MongoDB + RustFS
+├── docker-compose.yml               # frontend + backend + MongoDB + Redis + RustFS
 ├── pyproject.toml                   # Dependencies and metadata
 │
 ├── src/
@@ -415,7 +394,7 @@ video-app/
 
 ## Configuration Reference
 
-`config.yaml` uses [envyaml](https://github.com/thesimj/envyaml) syntax: `$ENV_VAR|default_value`.
+`config.yaml` uses [envyaml](https://github.com/thesimj/envyaml) syntax: `$VAR|default` falls back to the default, a bare `$VAR` is required. Values come from the environment or `.env` (environment wins); see `.env.example` for the full list.
 
 ```yaml
 # Container mount base path (set via env var in Docker, empty for local dev)
@@ -424,8 +403,8 @@ ROOT_PATH: $ROOT_PATH|
 # Video resource path mapping (category -> pseudo_name -> host path)
 resource_paths:
   Local-resource:                             # Local filesystem category
-    Resource-1: /your/video/path1
-    Resource-2: /your/video/path2
+    Resource-1: $LOCAL_RESOURCE_1             # host paths live in .env
+    Resource-2: $LOCAL_RESOURCE_2
   # S3-resource:                              # S3-compatible category
   #   Resource-1: /                           # host path is unused for S3
 
@@ -437,8 +416,8 @@ resource_paths:
 #     mounts:
 #       Resource-1:
 #         endpoint_url: $S3_RESOURCE_1_ENDPOINT_URL|http://localhost:9000
-#         access_key: $S3_RESOURCE_1_ACCESS_KEY|admin
-#         secret_key: $S3_RESOURCE_1_SECRET_KEY|admin
+#         access_key: $S3_RESOURCE_1_ACCESS_KEY      # required, from .env
+#         secret_key: $S3_RESOURCE_1_SECRET_KEY
 #         bucket: $S3_RESOURCE_1_BUCKET|video-app
 #         region: $S3_RESOURCE_1_REGION|us-east-1
 
@@ -449,9 +428,15 @@ resource_paths:
 #   storage_pseudo_name: Resource-1
 
 cache_config:
-  max_size: 2048                 # Maximum cache entries
-  ttl: 300                       # Expiry in seconds
-  cache_type: cachetools
+  cache_type: redis              # redis | cachetools (in-process)
+  key_prefix: video-app
+  ttl:                           # Seconds per purpose; each caller passes its own
+    dir_metadata: 300
+  redis:
+    url: $REDIS_URL|redis://localhost:6379/0
+    socket_timeout: 1.0          # An unreachable Redis degrades to cache misses
+  cachetools:
+    max_size: 3000               # Maximum entries
 
 # Effective value is max(ffmpeg_semaphore_limit, cpu_count // 2)
 ffmpeg_semaphore_limit: 4
@@ -501,8 +486,8 @@ mongo:
   host: $MONGO_HOST|localhost
   port: $MONGO_PORT|27017
   database: $MONGO_DATABASE|video_tag_db
-  username: $MONGO_USERNAME|
-  password: $MONGO_PASSWORD|
+  username: $MONGO_USERNAME      # required, from .env
+  password: $MONGO_PASSWORD
 ```
 
 ### Frontend environment
