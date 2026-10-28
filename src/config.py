@@ -2,10 +2,30 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings
 
+class CacheTTLConfig(BaseModel):
+    """Seconds an entry lives, per purpose. Each caller reads its own field and passes
+    it on every write, so one purpose can be tuned without touching the others."""
+
+    dir_metadata: int = 300
+
+
+class RedisCacheConfig(BaseModel):
+    url: str = "redis://localhost:6379/0"
+    socket_timeout: float = 1.0
+
+
+class CachetoolsCacheConfig(BaseModel):
+    max_size: int = 3000
+
+
 class CacheConfig(BaseModel):
-    max_size: int = 2048
-    ttl: int = 3600  # in seconds
-    cache_type: str = "cachetools"
+    # Defaults to the in-process backend so a configuration that never mentions
+    # Redis never tries to reach one.
+    cache_type: Literal["redis", "cachetools"] = "cachetools"
+    key_prefix: str = "video-app"
+    ttl: CacheTTLConfig = CacheTTLConfig()
+    redis: RedisCacheConfig = RedisCacheConfig()
+    cachetools: CachetoolsCacheConfig = CachetoolsCacheConfig()
 
 class PageSize(BaseModel):
     homepage_videos: int = 10

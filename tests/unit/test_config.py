@@ -90,3 +90,47 @@ class TestHandlerConfigResolution:
                     "handler_config": {"S3-cat": {"type": "s3", "mounts": {}}},
                 }
             )
+
+
+# ----------------------------------------------------------------------
+# ----------------------- Cache configuration ---------------------------
+# ----------------------------------------------------------------------
+
+
+class TestCacheConfig:
+    def test_yaml_shaped_cache_config_is_parsed(self):
+        # Given a cache_config dict shaped like config.yaml, with cache_type "redis",
+        #   a key_prefix, ttl.dir_metadata, redis.url / socket_timeout and cachetools.max_size
+        # When Settings are validated from it
+        # Then every one of those values is readable from settings.cache_config
+        settings = Settings.model_validate({
+            "cache_config": {
+                "cache_type": "redis",
+                "key_prefix": "video-app",
+                "ttl": {"dir_metadata": 120},
+                "redis": {"url": "redis://cache:6379/1", "socket_timeout": 0.5},
+                "cachetools": {"max_size": 3000},
+            }
+        })
+
+        cache = settings.cache_config
+        assert cache.cache_type == "redis"
+        assert cache.key_prefix == "video-app"
+        assert cache.ttl.dir_metadata == 120
+        assert cache.redis.url == "redis://cache:6379/1"
+        assert cache.redis.socket_timeout == 0.5
+        assert cache.cachetools.max_size == 3000
+
+    def test_omitted_cache_config_falls_back_to_cachetools(self):
+        # Given settings that contain no cache_config at all
+        # When Settings are validated
+        # Then cache_type is "cachetools", so nothing tries to reach a Redis that was never configured
+        settings = Settings.model_validate({})
+        assert settings.cache_config.cache_type == "cachetools"
+
+    def test_unknown_cache_type_is_rejected_while_settings_load(self):
+        # Given a cache_config whose cache_type is "memcached"
+        # When Settings are validated
+        # Then a ValidationError is raised at load time rather than on the first cache call
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"cache_config": {"cache_type": "memcached"}})

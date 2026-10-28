@@ -6,6 +6,7 @@ from pymongo import AsyncMongoClient
 import pytest_asyncio
 from testcontainers.core.container import LogMessageWaitStrategy
 from testcontainers.community.mongodb import MongoDbContainer
+from testcontainers.community.redis import RedisContainer
 import pytest
 
 from src import config
@@ -34,6 +35,20 @@ def mongo_container():
     with container as mongo:
         mongo.waiting_for(LogMessageWaitStrategy('ready'))
         yield mongo
+
+
+@pytest.fixture(scope="session")
+def redis_container():
+    """Start a Redis testcontainer for the entire test session."""
+    with RedisContainer(image="redis:7-alpine") as redis:
+        yield redis
+
+
+@pytest.fixture(scope="session")
+def redis_url(redis_container: RedisContainer) -> str:
+    host = redis_container.get_container_host_ip()
+    port = redis_container.get_exposed_port(redis_container.port)
+    return f"redis://{host}:{port}/0"
 
 
 @pytest.fixture(scope="session")

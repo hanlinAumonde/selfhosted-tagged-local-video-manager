@@ -36,6 +36,7 @@ class DirMetadataService:
         self.settings = settings
         self.resourceHandlerService = resource_handler_service
         self._cache = cache_service
+        self._ttl = settings.cache_config.ttl.dir_metadata
 
     def _cache_key(self, category: str, path: str) -> str:
         return f"{category}:{path}"
@@ -52,9 +53,10 @@ class DirMetadataService:
         :rtype: tuple[float, float] | None
         """
         cache_key = self._cache_key(category, path)
-        cached = self._cache.get(cache_key)
+        cached = await self._cache.get(cache_key)
         if cached is not None:
-            return cached
+            # The cache hands back JSON, so the pair arrives as a list.
+            return tuple(cached)
 
         doc = await DirMetadataModel.find_one(
             DirMetadataModel.category == category,
@@ -62,7 +64,7 @@ class DirMetadataService:
         )
         if doc is not None:
             result = (doc.total_size, doc.last_modified_time)
-            self._cache.set(cache_key, result)
+            await self._cache.set(cache_key, result, self._ttl)
             return result
 
         return None
@@ -90,7 +92,9 @@ class DirMetadataService:
             }},
             upsert=True
         )
-        self._cache.set(self._cache_key(category, path), (total_size, last_modified_time))
+        await self._cache.set(
+            self._cache_key(category, path), (total_size, last_modified_time), self._ttl
+        )
 
     async def _set_flags(self, category: str, path: str, flags: dict[str, bool]) -> None:
         """
@@ -170,7 +174,7 @@ class DirMetadataService:
         await DirMetadataModel.get_pymongo_collection().delete_one(
             {"category": category, "path": path}
         )
-        self._cache.delete(self._cache_key(category, path))
+        await self._cache.delete(self._cache_key(category, path))
 
     async def get_flags(self, category: str, paths: Iterable[str]) -> dict[str, DirFlags]:
         """
@@ -261,8 +265,12 @@ class DirMetadataService:
         except Exception as e:
             logger.exception(f"Bulk write error during dir metadata upsert: {e}")
 
-        for path, value in entries.items():
-            self._cache.set(self._cache_key(category, path), value)
+        # One batched write: a recalculation can cover hundreds of directories, and
+        # writing them one by one would cost a Redis round trip each.
+        await self._cache.set_many(
+            {self._cache_key(category, path): value for path, value in entries.items()},
+            self._ttl,
+        )
 
     async def calculate_directory_metadata(self,
                                            directory_path: AbsolutePath,

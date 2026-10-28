@@ -27,9 +27,17 @@ thumbnail_config:
   storage_pseudo_name: Resource-1
 
 cache_config:
-  max_size: 2048
-  ttl: 300  # in seconds
-  cache_type: cachetools
+  cache_type: redis  # redis | cachetools
+  key_prefix: video-app
+  # Seconds an entry lives, per purpose; each caller passes its own value on write.
+  ttl:
+    dir_metadata: 300
+  redis:
+    url: $REDIS_URL|redis://localhost:6379/0
+    socket_timeout: 1.0
+    # maxmemory / eviction policy belong to the Redis server: see docker-compose.yml.
+  cachetools:
+    max_size: 3000  # max number of entries
 
 ffmpeg_semaphore_limit: 4
 

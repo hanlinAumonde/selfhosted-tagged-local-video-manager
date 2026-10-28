@@ -43,8 +43,12 @@ services:
       - S3_RESOURCE_1_SECRET_KEY=rustfsadmin
       - S3_RESOURCE_1_BUCKET=video-app
       - S3_RESOURCE_1_REGION=us-east-1
+      # Redis cache
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       mongodb:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -100,6 +104,28 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
+    networks:
+      - video-app-network
+
+  redis:
+    image: redis:latest
+    container_name: video-app-redis
+    # A pure cache: memory is capped and the least recently used keys are evicted
+    # at the cap; nothing is persisted to disk.
+    command: >
+      redis-server
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
     networks:
       - video-app-network
