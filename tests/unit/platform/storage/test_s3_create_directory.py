@@ -12,6 +12,8 @@ Driven through ``botocore.stub.Stubber``: no network, and the exact API calls ar
 of what is asserted.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from botocore.stub import Stubber
 
@@ -46,7 +48,7 @@ def s3_handler() -> S3ResourceHandler:
 
 @pytest.fixture
 def stub(s3_handler: S3ResourceHandler) -> Stubber:
-    stubber = Stubber(s3_handler._buckets[PSEUDO_NAME].meta.client)
+    stubber = Stubber(s3_handler._clients[PSEUDO_NAME])
     with stubber:
         yield stubber
 
@@ -72,14 +74,14 @@ def _expect_no_object_at_the_bare_key(stub: Stubber) -> None:
 # ---------------------------- Happy path --------------------------------
 # -----------------------------------------------------------------------
 
-def test_create_directory_writes_a_marker_object(s3_handler: S3ResourceHandler, stub: Stubber):
+async def test_create_directory_writes_a_marker_object(s3_handler: S3ResourceHandler, stub: Stubber):
     _expect_prefix_is_empty(stub)
     _expect_no_object_at_the_bare_key(stub)
     stub.add_response(
         "put_object", {}, {"Bucket": BUCKET, "Key": MARKER_KEY, "Body": b""}
     )
 
-    s3_handler.create_directory(NEW_DIR_KEY)
+    await s3_handler.create_directory(NEW_DIR_KEY)
 
     stub.assert_no_pending_responses()
 
@@ -88,7 +90,7 @@ def test_create_directory_writes_a_marker_object(s3_handler: S3ResourceHandler, 
 # ------------------------- Refusals -------------------------------------
 # -----------------------------------------------------------------------
 
-def test_create_directory_rejects_a_prefix_that_already_holds_something(
+async def test_create_directory_rejects_a_prefix_that_already_holds_something(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     stub.add_response(
@@ -98,22 +100,22 @@ def test_create_directory_rejects_a_prefix_that_already_holds_something(
     )
 
     with pytest.raises(FileExistsError):
-        s3_handler.create_directory(NEW_DIR_KEY)
+        await s3_handler.create_directory(NEW_DIR_KEY)
 
     stub.assert_no_pending_responses()
 
 
-def test_create_directory_rejects_a_bare_key_held_by_a_file(
+async def test_create_directory_rejects_a_bare_key_held_by_a_file(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_prefix_is_empty(stub)
     stub.add_response(
         "head_object",
-        {"ContentLength": 10},
+        {"ContentLength": 10, "LastModified": datetime(2026, 1, 1, tzinfo=timezone.utc)},
         {"Bucket": BUCKET, "Key": NEW_DIR_KEY},
     )
 
     with pytest.raises(FileExistsError):
-        s3_handler.create_directory(NEW_DIR_KEY)
+        await s3_handler.create_directory(NEW_DIR_KEY)
 
     stub.assert_no_pending_responses()

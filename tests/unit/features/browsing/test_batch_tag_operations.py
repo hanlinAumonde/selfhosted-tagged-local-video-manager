@@ -77,9 +77,9 @@ def _write_events(events: list) -> list:
     ]
 
 
-def _entries(handler_svc: ResourceHandlerService, *fs_paths: Path) -> list:
+async def _entries(handler_svc: ResourceHandlerService, *fs_paths: Path) -> list:
     handler = handler_svc.get_handler(CATEGORY)
-    return [handler.get_entry(str(p).replace("\\", "/")) for p in fs_paths]
+    return [await handler.stat(str(p).replace("\\", "/")) for p in fs_paths]
 
 
 # -----------------------------------------------------------------------
@@ -235,7 +235,7 @@ async def test_newly_discovered_videos_are_inserted_with_the_added_tags_only(
     batch_svc, init_db, local_resource_handler_service, local_resource_dir: Path,
     fs_settings,
 ):
-    entries = _entries(
+    entries = await _entries(
         local_resource_handler_service,
         local_resource_dir / "movie_a.mp4",
         local_resource_dir / "movie_b.mp4",
@@ -260,7 +260,7 @@ async def test_newly_discovered_videos_are_inserted_untagged_when_nothing_is_add
     batch_svc, init_db, local_resource_handler_service, local_resource_dir: Path,
     fs_settings,
 ):
-    entries = _entries(
+    entries = await _entries(
         local_resource_handler_service,
         local_resource_dir / "movie_a.mp4",
         local_resource_dir / "movie_b.mp4",
@@ -295,7 +295,7 @@ async def test_a_directory_of_known_and_unknown_videos_is_settled_in_one_pass(
     for path in known_paths:
         await video_factory(name=Path(path).stem, path=path, tags=["todo"])
 
-    entries = _entries(
+    entries = await _entries(
         local_resource_handler_service,
         local_resource_dir / "movie_a.mp4",
         local_resource_dir / "movie_b.mp4",

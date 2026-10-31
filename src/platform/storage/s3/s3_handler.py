@@ -1,15 +1,39 @@
+import asyncio
 import posixpath
-from contextlib import contextmanager
-from typing import AsyncIterator, Generator, Iterator
+from typing import Any, AsyncIterator
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
-from fastapi.concurrency import run_in_threadpool
 from src.config import get_settings
 from src.config import S3HandlerConfig
-from src.platform.storage.base_file_entry import BaseFileEntry
 from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
-from src.platform.storage.s3.s3_file_entry import S3FileEntry
+from src.platform.storage.file_info import FileInfo
+
+#: Error codes S3-compatible servers use for "nothing at that key". HEAD carries no body,
+#: so it can only report the bare status code.
+_NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
+
+
+def _is_not_found(error: ClientError) -> bool:
+    return error.response.get("Error", {}).get("Code") in _NOT_FOUND_CODES
+
+
+def _key_name(key: str) -> str:
+    return key.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _object_info(obj: dict) -> FileInfo:
+    """A listed object. A key ending in "/" is a directory marker, not a file."""
+    key = obj["Key"]
+    if key.endswith("/"):
+        return FileInfo(name=_key_name(key), path=key, is_dir=True)
+    return FileInfo(
+        name=_key_name(key),
+        path=key,
+        is_dir=False,
+        size=obj["Size"],
+        mtime=obj["LastModified"].timestamp(),
+    )
 
 
 class S3ResourceHandler(BaseResourceHandler):
@@ -39,10 +63,13 @@ class S3ResourceHandler(BaseResourceHandler):
         self._category = category
         self._pseudo_paths = pseudo_paths
         self._configs = handler_configs
-        self._buckets: dict[str, "boto3.resources.factory.s3.Bucket"] = {}
+        # Low-level clients only: boto3 documents clients as thread-safe and resources as
+        # not, and every request here runs on a worker thread.
+        self._clients: dict[str, Any] = {}
+        self._bucket_names: dict[str, str] = {}
 
         for pseudo_name, config in handler_configs.items():
-            s3 = boto3.resource(
+            self._clients[pseudo_name] = boto3.client(
                 "s3",
                 endpoint_url=config.endpoint_url,
                 aws_access_key_id=config.access_key,
@@ -60,7 +87,7 @@ class S3ResourceHandler(BaseResourceHandler):
                     }
                 )
             )
-            self._buckets[pseudo_name] = s3.Bucket(config.bucket)
+            self._bucket_names[pseudo_name] = config.bucket
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -80,20 +107,15 @@ class S3ResourceHandler(BaseResourceHandler):
         relative = parts[2] if len(parts) > 2 else ""
         return pseudo_name, relative
 
-    def _get_bucket(self, pseudo_name: str) -> "boto3.resources.factory.s3.Bucket":
-        """Get the Bucket resource for a given pseudo_name."""
-        if pseudo_name not in self._buckets:
+    def _target(self, key: str) -> tuple[Any, str]:
+        """The client and bucket name serving an S3 key."""
+        pseudo_name, _ = self._get_pseudo_name_from_key(key)
+        if pseudo_name not in self._clients:
             raise ValueError(
                 f"No S3 client configured for pseudo_name '{pseudo_name}' "
                 f"in category '{self._category}'"
             )
-        return self._buckets[pseudo_name]
-
-    def _get_object(self, path: str) -> "boto3.resources.factory.s3.Object":
-        """Get an S3 Object resource from an S3 key."""
-        pseudo_name, _ = self._get_pseudo_name_from_key(path)
-        bucket = self._get_bucket(pseudo_name)
-        return bucket.Object(path)
+        return self._clients[pseudo_name], self._bucket_names[pseudo_name]
 
     def _build_video_key(self, pseudo_name: str, relative_path: str) -> str:
         """Build S3 key for a video file."""
@@ -133,152 +155,171 @@ class S3ResourceHandler(BaseResourceHandler):
     # IO operations
     # ------------------------------------------------------------------
 
-    @contextmanager
-    def list_directory(self, path: str) -> Generator[Iterator[BaseFileEntry], None, None]:
+    async def list_directory(self, path: str) -> list[FileInfo]:
         """
-        List entries in a "directory" (S3 prefix).
-        path is an S3 key prefix, e.g. "videos/Resource-1/action/"
+        List one level of a "directory" (S3 prefix), e.g. "videos/Resource-1/action".
 
-        Uses the underlying client paginator because Bucket.objects.filter()
-        does not expose CommonPrefixes (needed for pseudo-directory listing).
+        Sub-directories come back as CommonPrefixes, whose paths keep their trailing "/".
+        The directory's own marker object is not an entry of itself.
         """
-        pseudo_name, _ = self._get_pseudo_name_from_key(path)
-        bucket = self._get_bucket(pseudo_name)
-        client = bucket.meta.client
+        client, bucket = self._target(path)
+        prefix = path.rstrip("/") + "/"
 
-        prefix = path if path.endswith("/") else path + "/"
+        def _list() -> list[FileInfo]:
+            infos: list[FileInfo] = []
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter="/"):
+                for cp in page.get("CommonPrefixes", []):
+                    infos.append(
+                        FileInfo(name=_key_name(cp["Prefix"]), path=cp["Prefix"], is_dir=True)
+                    )
+                infos.extend(
+                    _object_info(obj) for obj in page.get("Contents", []) if obj["Key"] != prefix
+                )
+            return infos
 
-        entries: list[BaseFileEntry] = []
-        paginator = client.get_paginator("list_objects_v2")
+        return await asyncio.to_thread(_list)
 
-        for page in paginator.paginate(Bucket=bucket.name, Prefix=prefix, Delimiter="/"):
-            for cp in page.get("CommonPrefixes", []):
-                entries.append(S3FileEntry(key=cp["Prefix"], is_directory=True))
+    async def walk(self, path: str) -> AsyncIterator[list[FileInfo]]:
+        """
+        One batch per listing page of the whole prefix, listed flat — no Delimiter, so a
+        request covers up to 1000 objects wherever they sit rather than one directory.
 
-            for obj in page.get("Contents", []):
-                if obj["Key"] == prefix:
-                    continue
-                entries.append(S3FileEntry(
-                    key=obj["Key"],
-                    size=obj["Size"],
-                    mtime=obj["LastModified"].timestamp(),
-                    is_directory=False,
-                ))
+        A flat listing names no directories, except through the markers left by
+        ``create_directory``; those are reported as directories, the root's own excepted.
+        Directories that exist only because something lives under them are left for the
+        caller to infer from the paths of what is reported.
+        """
+        client, bucket = self._target(path)
+        prefix = path.rstrip("/") + "/"
+        pages = iter(
+            client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+        )
 
-        yield iter(entries)
+        first = True
+        while (page := await asyncio.to_thread(next, pages, None)) is not None:
+            if first and page.get("KeyCount", 0) == 0:
+                raise FileNotFoundError(f"S3 prefix holds nothing: {prefix}")
+            first = False
+            batch = [
+                _object_info(obj) for obj in page.get("Contents", []) if obj["Key"] != prefix
+            ]
+            if batch:
+                yield batch
 
-    def get_entry(self, path: str) -> BaseFileEntry:
-        """Get a single S3 object entry by its key."""
-        obj = self._get_object(path)
+    def _head(self, path: str) -> FileInfo | None:
+        client, bucket = self._target(path)
         try:
-            obj.load()
-            return S3FileEntry(
-                key=path,
-                size=obj.content_length,
-                mtime=obj.last_modified.timestamp(),
-                is_directory=False,
-            )
-        except ClientError:
-            return S3FileEntry(key=path, is_directory=True)
+            head = client.head_object(Bucket=bucket, Key=path)
+        except ClientError as e:
+            if _is_not_found(e):
+                return None
+            raise
+        return FileInfo(
+            name=_key_name(path),
+            path=path,
+            is_dir=False,
+            size=head["ContentLength"],
+            mtime=head["LastModified"].timestamp(),
+        )
 
-    def get_size(self, path: str) -> float:
-        obj = self._get_object(path)
-        obj.load()
-        return obj.content_length
+    async def stat(self, path: str) -> FileInfo | None:
+        return await asyncio.to_thread(self._head, path)
 
-    def file_exists(self, path: str) -> bool:
-        obj = self._get_object(path)
-        try:
-            obj.load()
-            return True
-        except ClientError:
-            return False
+    async def delete_file(self, path: str) -> None:
+        client, bucket = self._target(path)
+        await asyncio.to_thread(client.delete_object, Bucket=bucket, Key=path)
 
-    def delete_file(self, path: str) -> None:
-        self._get_object(path).delete()
-
-    def create_directory(self, path: str) -> None:
+    async def create_directory(self, path: str) -> None:
         """
         Object storage has no directories, so one zero-byte marker key stands in for it.
         Without the marker an empty "directory" would not exist at all: a prefix is only
         visible while something lives under it.
         """
-        pseudo_name, _ = self._get_pseudo_name_from_key(path)
-        bucket = self._get_bucket(pseudo_name)
+        client, bucket = self._target(path)
         marker_key = path.rstrip("/") + "/"
 
-        # Anything under the prefix means the name is taken as a directory; an object at
-        # the bare key means it is taken as a file.
-        listing = bucket.meta.client.list_objects_v2(
-            Bucket=bucket.name, Prefix=marker_key, MaxKeys=1
-        )
-        if listing.get("KeyCount", 0) > 0 or self.file_exists(path):
-            raise FileExistsError(f"S3 key already in use: {marker_key}")
+        def _create() -> None:
+            # Anything under the prefix means the name is taken as a directory; an object
+            # at the bare key means it is taken as a file.
+            listing = client.list_objects_v2(Bucket=bucket, Prefix=marker_key, MaxKeys=1)
+            if listing.get("KeyCount", 0) > 0 or self._head(path) is not None:
+                raise FileExistsError(f"S3 key already in use: {marker_key}")
+            client.put_object(Bucket=bucket, Key=marker_key, Body=b"")
 
-        bucket.Object(marker_key).put(Body=b"")
+        await asyncio.to_thread(_create)
 
-    def delete_directory(self, path: str) -> None:
-        """
-        Remove the marker object that stands in for this directory.
-
-        There is nothing else to unlink: the prefix itself is not a thing, so once the
-        marker goes the "directory" stops existing.
-        """
-        marker_key = path.rstrip("/") + "/"
-        if not self.is_directory_empty(path):
-            raise OSError(f"S3 prefix is not empty: {marker_key}")
-        self._get_object(marker_key).delete()
-
-    def is_directory_empty(self, path: str) -> bool:
+    def _is_directory_empty(self, path: str) -> bool:
         """
         Whether the marker object is the only thing under the prefix.
 
         Two keys are enough to answer it: the marker, plus the first thing that is not
         the marker.
         """
-        pseudo_name, _ = self._get_pseudo_name_from_key(path)
-        bucket = self._get_bucket(pseudo_name)
+        client, bucket = self._target(path)
+        marker_key = path.rstrip("/") + "/"
+        listing = client.list_objects_v2(Bucket=bucket, Prefix=marker_key, MaxKeys=2)
+        return all(obj["Key"] == marker_key for obj in listing.get("Contents", []))
+
+    async def delete_directory(self, path: str) -> None:
+        """
+        Remove the marker object that stands in for this directory.
+
+        There is nothing else to unlink: the prefix itself is not a thing, so once the
+        marker goes the "directory" stops existing.
+        """
+        client, bucket = self._target(path)
         marker_key = path.rstrip("/") + "/"
 
-        listing = bucket.meta.client.list_objects_v2(
-            Bucket=bucket.name, Prefix=marker_key, MaxKeys=2
-        )
-        return all(
-            obj["Key"] == marker_key for obj in listing.get("Contents", [])
-        )
+        def _delete() -> None:
+            if not self._is_directory_empty(path):
+                raise OSError(f"S3 prefix is not empty: {marker_key}")
+            client.delete_object(Bucket=bucket, Key=marker_key)
+
+        await asyncio.to_thread(_delete)
+
+    async def is_directory_empty(self, path: str) -> bool:
+        return await asyncio.to_thread(self._is_directory_empty, path)
 
     # ------------------------------------------------------------------
     # File content read/write
     # ------------------------------------------------------------------
 
-    async def read_file_chunk(self, path: str, offset: int, length: int) -> bytes:
-        obj = self._get_object(path)
-        range_header = f"bytes={offset}-{offset + length - 1}"
+    async def read_file(self, path: str) -> bytes | None:
+        client, bucket = self._target(path)
 
-        def _read():
-            response = obj.get(Range=range_header)
+        def _read() -> bytes | None:
+            try:
+                response = client.get_object(Bucket=bucket, Key=path)
+            except ClientError as e:
+                if _is_not_found(e):
+                    return None
+                raise
             return response["Body"].read()
 
-        return await run_in_threadpool(_read)
+        return await asyncio.to_thread(_read)
+
+    async def read_file_chunk(self, path: str, offset: int, length: int) -> bytes:
+        client, bucket = self._target(path)
+        range_header = f"bytes={offset}-{offset + length - 1}"
+
+        def _read() -> bytes:
+            return client.get_object(Bucket=bucket, Key=path, Range=range_header)["Body"].read()
+
+        return await asyncio.to_thread(_read)
 
     async def write_file(self, path: str, data: bytes) -> None:
-        obj = self._get_object(path)
-
-        def _write():
-            obj.put(Body=data)
-
-        await run_in_threadpool(_write)
+        client, bucket = self._target(path)
+        await asyncio.to_thread(client.put_object, Bucket=bucket, Key=path, Body=data)
 
     async def write_file_streaming(self, path: str, data_stream: AsyncIterator[bytes]) -> int:
-        pseudo_name, _ = self._get_pseudo_name_from_key(path)
-        bucket = self._get_bucket(pseudo_name)
-        client = bucket.meta.client
+        client, bucket = self._target(path)
 
         MIN_PART_SIZE = 5 * 1024 * 1024  # 5MB — S3 minimum part size
 
-        mpu = await run_in_threadpool(
+        mpu = await asyncio.to_thread(
             client.create_multipart_upload,
-            Bucket=bucket.name,
+            Bucket=bucket,
             Key=path,
         )
         upload_id = mpu["UploadId"]
@@ -297,9 +338,9 @@ class S3ResourceHandler(BaseResourceHandler):
                     part_data = bytes(buffer[:MIN_PART_SIZE])
                     buffer = bytearray(buffer[MIN_PART_SIZE:])
 
-                    response = await run_in_threadpool(
+                    response = await asyncio.to_thread(
                         client.upload_part,
-                        Bucket=bucket.name,
+                        Bucket=bucket,
                         Key=path,
                         UploadId=upload_id,
                         PartNumber=part_number,
@@ -309,9 +350,9 @@ class S3ResourceHandler(BaseResourceHandler):
                     part_number += 1
 
             if buffer or not parts:
-                response = await run_in_threadpool(
+                response = await asyncio.to_thread(
                     client.upload_part,
-                    Bucket=bucket.name,
+                    Bucket=bucket,
                     Key=path,
                     UploadId=upload_id,
                     PartNumber=part_number,
@@ -319,9 +360,9 @@ class S3ResourceHandler(BaseResourceHandler):
                 )
                 parts.append({"PartNumber": part_number, "ETag": response["ETag"]})
 
-            await run_in_threadpool(
+            await asyncio.to_thread(
                 client.complete_multipart_upload,
-                Bucket=bucket.name,
+                Bucket=bucket,
                 Key=path,
                 UploadId=upload_id,
                 MultipartUpload={"Parts": parts},
@@ -330,9 +371,9 @@ class S3ResourceHandler(BaseResourceHandler):
             return total_written
 
         except Exception:
-            await run_in_threadpool(
+            await asyncio.to_thread(
                 client.abort_multipart_upload,
-                Bucket=bucket.name,
+                Bucket=bucket,
                 Key=path,
                 UploadId=upload_id,
             )
@@ -386,12 +427,10 @@ class S3ResourceHandler(BaseResourceHandler):
     def get_ffmpeg_accessible_path(self, path: str) -> str | None:
         """Generate a pre-signed URL that ffmpeg can use as HTTP input."""
         try:
-            pseudo_name, _ = self._get_pseudo_name_from_key(path)
-            bucket = self._get_bucket(pseudo_name)
-            client = bucket.meta.client
+            client, bucket = self._target(path)
             return client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": bucket.name, "Key": path},
+                Params={"Bucket": bucket, "Key": path},
                 ExpiresIn=3600,
             )
         except Exception:
@@ -406,7 +445,7 @@ class S3ResourceHandler(BaseResourceHandler):
         name = filename.rstrip("/").rsplit("/", 1)[-1]
         _, ext = posixpath.splitext(name.lower())
         return ext in get_settings().video_extensions
-    
+
     @staticmethod
     def get_file_extension(filename: str) -> str:
         name = filename.rstrip("/").rsplit("/", 1)[-1]

@@ -1,3 +1,6 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse
@@ -32,6 +35,9 @@ def create_app():
             log_dir=settings.logging.log_dir,
             rotation=settings.logging.rotation,
             retention=settings.logging.retention,
+        )
+        asyncio.get_running_loop().set_default_executor(
+            ThreadPoolExecutor(max_workers=settings.io_thread_pool_size, thread_name_prefix="storage-io")
         )
         await setup_mongo(settings.mongo)
         task_runner = await init_task_runner()

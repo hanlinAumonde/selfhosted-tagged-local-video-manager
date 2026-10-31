@@ -13,7 +13,7 @@ from src.logger import get_logger
 from src.features.browsing.dir_metadata_service import DirFlags, DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
-from src.platform.storage.base_file_entry import BaseFileEntry
+from src.platform.storage.file_info import FileInfo
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.platform.jobs.path_locks import PathLockRegistry
@@ -65,9 +65,7 @@ class VideoEntry:
 BrowseEntry = DirectoryEntry | VideoEntry
 
 #: Decides whether one video file met during a directory walk belongs in the result.
-#: ``False`` excludes it; ``True`` and ``None`` keep it, so a caller with nothing to say
-#: about an entry does not have to say it.
-SearchOperator = Callable[[BaseFileEntry], bool | None]
+SearchOperator = Callable[[FileInfo], bool | None]
 
 #: Characters that would make a new directory name address something other than a single
 #: child of the directory the user is looking at.
@@ -196,30 +194,24 @@ class BrowseFileService:
         sub_directories: list[tuple[AbsolutePath, str]] = []
         pending: list[_PendingVideo] = []
 
-        with handler.list_directory(abs_path.FS_format_path()) as entries:
-            for entry in entries:
-                try:
-                    entry_path = AbsolutePath.from_existing_path(
-                        path=entry.path,
-                        category=category,
-                        handler=handler
+        for entry in await handler.list_directory(abs_path.FS_format_path()):
+            entry_path = AbsolutePath.from_existing_path(
+                path=entry.path,
+                category=category,
+                handler=handler
+            )
+            if entry.is_dir:
+                sub_directories.append((entry_path, entry.name))
+            elif handler.is_video_file(entry.name):
+                pending.append(
+                    _PendingVideo(
+                        db_path=entry_path.DB_format_path(),
+                        fs_path=entry.path,
+                        name=handler.get_filename_without_extension(entry.name),
+                        mtime=entry.mtime,
+                        size=entry.size
                     )
-                    if entry.is_dir():
-                        sub_directories.append((entry_path, entry.name))
-                    elif entry.is_file() and handler.is_video_file(entry.name):
-                        stat = entry.stat()
-                        pending.append(
-                            _PendingVideo(
-                                db_path=entry_path.DB_format_path(),
-                                fs_path=entry.path,
-                                name=handler.get_filename_without_extension(entry.name),
-                                mtime=stat.mtime,
-                                size=stat.size
-                            )
-                        )
-                except OSError as e:
-                    logger.exception(f"Error processing file {entry.path}: {e}")
-                    continue
+                )
 
         # One lookup answers "did a user make this?" and "did a user delete this?" for
         # every sub-directory at once; per-row it would be a query per listed folder.
@@ -457,7 +449,7 @@ class BrowseFileService:
         ).DB_format_path()
 
         try:
-            handler.create_directory(new_fs_path)
+            await handler.create_directory(new_fs_path)
         except FileExistsError:
             # A directory a user deleted is still on the storage whenever something else
             # was inside it. Re-creating the same name is then a matter of clearing the
@@ -474,17 +466,20 @@ class BrowseFileService:
         await self.dirMetadataService.mark_user_created(category, db_path)
         return db_path
 
-    def get_all_video_entries_in_directory(self,
-                                           mounted_directory_path: str,
-                                           category: str,
-                                           search_operator: SearchOperator | None = None
-                                           ) -> list[BaseFileEntry]:
+    async def get_all_video_entries_in_directory(self,
+                                                 mounted_directory_path: str,
+                                                 category: str,
+                                                 search_operator: SearchOperator | None = None
+                                                 ) -> list[FileInfo]:
         """
         Get all video file entries under the given directory and its subdirectories.
 
         ``search_operator`` decides which of them are wanted. A rejected entry is dropped
         from the result and nothing else: the walk carries on, so a directory whose own
         files all fail the test still contributes whatever its sub-directories hold.
+
+        A walk that fails part-way returns what it had collected by then; the failure is
+        logged, as the per-directory listing this replaced did.
 
         :param mounted_directory_path: The path of the mounted directory.
         :type mounted_directory_path: str
@@ -494,24 +489,17 @@ class BrowseFileService:
             excludes that file; ``True``, ``None``, or no operator at all keeps it.
         :type search_operator: SearchOperator | None
         :return: A list of video file entries.
-        :rtype: list[BaseFileEntry]
+        :rtype: list[FileInfo]
         """
-        video_entries: list[BaseFileEntry] = []
+        video_entries: list[FileInfo] = []
         handler = self.resourceHandlerService.get_handler(category)
         try:
-            with handler.list_directory(mounted_directory_path) as entries:
-                for entry in entries:
-                    if entry.is_file() and handler.is_video_file(entry.name):
-                        if search_operator is None or search_operator(entry) is not False:
-                            video_entries.append(entry)
-                    elif entry.is_dir():
-                        video_entries.extend(
-                            self.get_all_video_entries_in_directory(
-                                handler.get_path_standard_format(entry.path),
-                                category,
-                                search_operator
-                            )
-                        )
+            async for batch in handler.walk(mounted_directory_path):
+                for entry in batch:
+                    if entry.is_dir or not handler.is_video_file(entry.name):
+                        continue
+                    if search_operator is None or search_operator(entry) is not False:
+                        video_entries.append(entry)
         except (OSError, Exception):
             logger.exception(f"Error accessing directory {mounted_directory_path} to get video entries.")
         return video_entries
@@ -586,7 +574,7 @@ class BrowseFileService:
         # than again on the way out.
         db_path_by_entry: dict[str, str] = {}
 
-        def is_candidate(entry: BaseFileEntry) -> bool:
+        def is_candidate(entry: FileInfo) -> bool:
             db_path = AbsolutePath.from_existing_path(
                 path=entry.path, category=category, handler=handler
             ).DB_format_path()
@@ -597,7 +585,7 @@ class BrowseFileService:
 
         documents = [
             candidates[db_path_by_entry[entry.path]]
-            for entry in self.get_all_video_entries_in_directory(
+            for entry in await self.get_all_video_entries_in_directory(
                 abs_path.FS_format_path(), category, search_operator=is_candidate
             )
         ]

@@ -69,7 +69,7 @@ class ThumbnailService:
             handler=video_handler
         )
         video_fs_path = video_path.FS_format_path()
-        if not video_handler.file_exists(video_fs_path):
+        if await video_handler.stat(video_fs_path) is None:
             logger.warning(f"Video file not found at path: {video_fs_path}")
             raise HTTPException(status_code=404, detail="Video file doesn't exist")
 
@@ -116,10 +116,7 @@ class ThumbnailService:
         :rtype: bytes | None
         """
         try:
-            if not self._storage_handler.file_exists(thumbnail_path):
-                return None
-            size = self._storage_handler.get_size(thumbnail_path)
-            return await self._storage_handler.read_file_chunk(thumbnail_path, 0, int(size))
+            return await self._storage_handler.read_file(thumbnail_path)
         except Exception as e:
             logger.warning(f"Failed to read stored thumbnail at {thumbnail_path}: {e}")
             return None

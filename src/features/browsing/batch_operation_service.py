@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import AsyncGenerator
 from bson import ObjectId
-from fastapi.concurrency import run_in_threadpool
 from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
 from src.features.catalog.video import VideoModel
@@ -18,7 +17,7 @@ from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
-from src.platform.storage.base_file_entry import BaseFileEntry
+from src.platform.storage.file_info import FileInfo
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.tag_operation_service import TagOperationService
@@ -91,7 +90,7 @@ class BatchOperationService:
     async def batch_delete(self,
                            dir_path: AbsolutePath,
                            videoIds: list[str],
-                           fileEntries: list[BaseFileEntry] | None,
+                           fileEntries: list[FileInfo] | None,
                            directoryDeletion: DirectoryDeletionStrategy | None = None
                            ) -> AsyncGenerator[BatchProgress, None]:
         """
@@ -102,7 +101,7 @@ class BatchOperationService:
         :param videoIds: List of video IDs to delete.
         :type videoIds: list[str]
         :param fileEntries: List of file entries representing videos to delete (used if videoIds is not provided).
-        :type fileEntries: list[BaseFileEntry] | None
+        :type fileEntries: list[FileInfo] | None
         :param directoryDeletion: What becomes of ``dir_path`` itself. Set only when the
             request is a "Delete all" on that directory; ``None`` means the directory is
             merely where the deleted videos happened to live.
@@ -258,9 +257,7 @@ class BatchOperationService:
             yield self.constructBatchOperationStatus(status="Kept the folder")
             return
 
-        removed = await run_in_threadpool(
-            self._delete_directory_if_empty, handler, dir_path.FS_format_path()
-        )
+        removed = await self._delete_directory_if_empty(handler, dir_path.FS_format_path())
         if removed:
             await self.dirMetadataService.forget(category, db_path)
             yield self.constructBatchOperationStatus(status="Removed the folder")
@@ -278,7 +275,7 @@ class BatchOperationService:
                 )
             )
 
-    def _delete_directory_if_empty(self, handler: BaseResourceHandler, fs_path: str) -> bool:
+    async def _delete_directory_if_empty(self, handler: BaseResourceHandler, fs_path: str) -> bool:
         """
         Take the directory off the storage, but only if nothing at all is left in it.
 
@@ -293,9 +290,9 @@ class BatchOperationService:
         :rtype: bool
         """
         try:
-            if not handler.is_directory_empty(fs_path):
+            if not await handler.is_directory_empty(fs_path):
                 return False
-            handler.delete_directory(fs_path)
+            await handler.delete_directory(fs_path)
             return True
         except (OSError, Exception) as e:
             logger.exception(f"Could not remove directory {fs_path}: {e}")
@@ -304,7 +301,7 @@ class BatchOperationService:
     async def batch_update(self,
                            category: str,
                            videoIDs: list[str] | None,
-                           fileEntries: list[BaseFileEntry] | None,
+                           fileEntries: list[FileInfo] | None,
                            author: str | None,
                            tagsOperation: TagsOperationMappingInputModel,
                            seriesOperation: SeriesOperationInputModel | None = None) -> AsyncGenerator[BatchProgress, None]:
@@ -316,7 +313,7 @@ class BatchOperationService:
         :param videoIDs: List of video IDs to update (if updating by IDs).
         :type videoIDs: list[str] | None
         :param fileEntries: List of file entries representing videos to update (used if updating by directory path).
-        :type fileEntries: list[BaseFileEntry] | None
+        :type fileEntries: list[FileInfo] | None
         :param author: The new author to set for the videos (optional).
         :type author: str | None
         :param tagsOperation: The tags operation to apply to the videos.
@@ -553,7 +550,7 @@ class BatchOperationService:
         :type category: str
         """
         paths_to_delete = [v.path for v in actually_deleted]
-        await run_in_threadpool(self._remove_videos_by_paths, paths_to_delete, category)
+        await self._remove_videos_by_paths(paths_to_delete, category)
         await self.seriesService.detach([str(v.id) for v in actually_deleted])
 
         update_tags: dict[str, tuple[int, bool]] = {}
@@ -562,7 +559,7 @@ class BatchOperationService:
         if update_tags:
             await self.tagOperationService.update_tag_counts(update_tags=update_tags)
 
-    def _remove_videos_by_paths(self, paths: list[str], category: str) -> None:
+    async def _remove_videos_by_paths(self, paths: list[str], category: str) -> None:
         """
         Helper function to remove video files from the filesystem based on their paths and category.
         
@@ -574,13 +571,13 @@ class BatchOperationService:
         try:
             handler = self.resourceHandlerService.get_handler(category)
             for path in paths:
-                handler.delete_file(handler.convert_to_FS_format_path(path))
+                await handler.delete_file(handler.convert_to_FS_format_path(path))
         except Exception as e:
             logger.exception(f"Error removing video files: {e}")
             raise FileBrowseError("Error removing video files.")
 
     async def _process_new_video_entry(self,
-                                       entry: BaseFileEntry,
+                                       entry: FileInfo,
                                        category: str,
                                        author: str | None,
                                        tagsOperation: TagsOperationMappingInputModel | None,
@@ -589,7 +586,7 @@ class BatchOperationService:
         Helper function to prepare an UpdateOne operation for a new video entry that does not have an existing VideoModel in the database.
         
         :param entry: The file entry representing the new video.
-        :type entry: BaseFileEntry
+        :type entry: FileInfo
         :param category: The category of the new video.
         :type category: str
         :param author: The author to set for the new video (optional).
@@ -614,7 +611,6 @@ class BatchOperationService:
             entry_path.FS_format_path()
         ) or 0.0
 
-        stat = entry.stat()
         # by_alias so the primary key stays "_id", and exclude it so MongoDB assigns one:
         # a plain model_dump() would write a second, always-null "id" field alongside it.
         set_on_insert = VideoModel(
@@ -622,8 +618,8 @@ class BatchOperationService:
             name=handler.get_filename_without_extension(entry.name),
             path=entry_path.DB_format_path(),
             isDir=False,
-            lastModifyTime=stat.mtime,
-            size=stat.size,
+            lastModifyTime=entry.mtime,
+            size=entry.size,
             duration=duration,
             tags=[]
         ).model_dump(by_alias=True, exclude={"id"})

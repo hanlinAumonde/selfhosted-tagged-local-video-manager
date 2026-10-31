@@ -22,30 +22,30 @@ pytestmark = pytest.mark.unit
 # ------------------------- Deleting -------------------------------------
 # -----------------------------------------------------------------------
 
-def test_delete_directory_removes_an_empty_directory(
+async def test_delete_directory_removes_an_empty_directory(
     local_handler, local_resource_dir: Path,
 ):
     target = local_resource_dir / "subdir" / "empty"
     assert target.is_dir()
 
-    local_handler.delete_directory(str(target))
+    await local_handler.delete_directory(str(target))
 
     assert not target.exists()
 
 
-def test_delete_directory_refuses_a_directory_that_still_holds_a_file(
+async def test_delete_directory_refuses_a_directory_that_still_holds_a_file(
     local_handler, local_resource_dir: Path,
 ):
     target = local_resource_dir / "subdir"
 
     with pytest.raises(OSError):
-        local_handler.delete_directory(str(target))
+        await local_handler.delete_directory(str(target))
 
     assert target.is_dir()
     assert (target / "movie_c.mp4").is_file()
 
 
-def test_delete_directory_refuses_a_directory_that_still_holds_a_sub_directory(
+async def test_delete_directory_refuses_a_directory_that_still_holds_a_sub_directory(
     local_handler, local_resource_dir: Path,
 ):
     target = local_resource_dir / "holder"
@@ -53,39 +53,39 @@ def test_delete_directory_refuses_a_directory_that_still_holds_a_sub_directory(
     (target / "nested").mkdir()
 
     with pytest.raises(OSError):
-        local_handler.delete_directory(str(target))
+        await local_handler.delete_directory(str(target))
 
     assert (target / "nested").is_dir()
 
 
-def test_delete_directory_raises_for_a_path_that_is_not_there(
+async def test_delete_directory_raises_for_a_path_that_is_not_there(
     local_handler, local_resource_dir: Path,
 ):
     with pytest.raises(OSError):
-        local_handler.delete_directory(str(local_resource_dir / "never_existed"))
+        await local_handler.delete_directory(str(local_resource_dir / "never_existed"))
 
 
 # -----------------------------------------------------------------------
 # --------------------- Asking what is left ------------------------------
 # -----------------------------------------------------------------------
 
-def test_is_directory_empty_is_true_for_a_directory_holding_nothing(
+async def test_is_directory_empty_is_true_for_a_directory_holding_nothing(
     local_handler, local_resource_dir: Path,
 ):
-    assert local_handler.is_directory_empty(str(local_resource_dir / "subdir" / "empty"))
+    assert await local_handler.is_directory_empty(str(local_resource_dir / "subdir" / "empty"))
 
 
-def test_is_directory_empty_is_false_when_a_non_video_file_remains(
+async def test_is_directory_empty_is_false_when_a_non_video_file_remains(
     local_handler, local_resource_dir: Path,
 ):
     target = local_resource_dir / "docs"
     target.mkdir()
     (target / "readme.txt").write_text("not a video")
 
-    assert local_handler.is_directory_empty(str(target)) is False
+    assert await local_handler.is_directory_empty(str(target)) is False
 
 
-def test_is_directory_empty_is_false_when_a_sub_directory_remains(
+async def test_is_directory_empty_is_false_when_a_sub_directory_remains(
     local_handler, local_resource_dir: Path,
 ):
-    assert local_handler.is_directory_empty(str(local_resource_dir / "subdir")) is False
+    assert await local_handler.is_directory_empty(str(local_resource_dir / "subdir")) is False

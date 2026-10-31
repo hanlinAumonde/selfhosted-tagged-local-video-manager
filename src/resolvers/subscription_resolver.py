@@ -1,5 +1,4 @@
 from typing import AsyncGenerator
-from fastapi.concurrency import run_in_threadpool
 import strawberry
 from src.context import ContextEnum, get_context_value
 from src.errors import InputValidationError
@@ -90,8 +89,7 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
     all_entries = []
     for cat, abs_path in category_path_pairs:
         browseFileService: BrowseFileService = get_context_value(info, ContextEnum.BROWSE_FILE_SERVICE)
-        entries = await run_in_threadpool(
-            browseFileService.get_all_video_entries_in_directory,
+        entries = await browseFileService.get_all_video_entries_in_directory(
             abs_path.FS_format_path(),
             cat
         )

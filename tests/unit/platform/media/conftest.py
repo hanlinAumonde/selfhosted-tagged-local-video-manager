@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.platform.storage.file_info import FileInfo
+
 class _MockProcess:
     """Minimal mock of an asyncio subprocess process.
 
@@ -91,6 +93,8 @@ def handler_with_piped_only() -> MagicMock:
     """A handler that has no direct ffmpeg path (forces piped mode)."""
     h = MagicMock(name="handler")
     h.get_ffmpeg_accessible_path.return_value = None
-    h.get_size.return_value = 100
+    h.stat = AsyncMock(
+        return_value=FileInfo(name="video.mp4", path="/video.mp4", is_dir=False, size=100, mtime=1.0)
+    )
     h.read_file_chunk = AsyncMock(return_value=b"x" * 100)
     return h

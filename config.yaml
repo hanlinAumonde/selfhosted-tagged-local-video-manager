@@ -43,6 +43,8 @@ cache_config:
     max_size: 3000  # max number of entries
 
 ffmpeg_semaphore_limit: 4
+# Threads for blocking storage IO (local disk, S3 requests)
+io_thread_pool_size: 32
 
 suggestion_limit:
   name: 10

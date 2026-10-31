@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.config import Settings
+from src.platform.storage.file_info import FileInfo
 from src.platform.storage.local_fs.local_fs_handler import LocalFSResourceHandler
 from src.features.playback.thumbnail_service import ThumbnailService
 
@@ -13,7 +14,7 @@ def _mock_handler():
     h.convert_to_DB_format_path.side_effect = lambda p: p
     h.get_path_standard_format.side_effect = lambda p: p
     h.get_ffmpeg_accessible_path.return_value = "/fake.mp4"
-    h.file_exists.return_value = True
+    h.stat.return_value = FileInfo(name="video.mp4", path="/video.mp4", is_dir=False, size=1024, mtime=1.0)
     h.get_filename_without_extension.side_effect = lambda n: n.rsplit(".", 1)[0]
     return h
 
@@ -66,9 +67,7 @@ def thumb_svc_with_storage(handler_svc, ffmpeg_svc, handler):
 
     storage = MagicMock(spec=LocalFSResourceHandler, name="storage_handler")
     storage.join_path.side_effect = lambda *parts: "/".join(parts)
-    storage.file_exists.return_value = True
-    storage.get_size.return_value = 1024
-    storage.read_file_chunk = AsyncMock(return_value=b"STORED-JPEG")
+    storage.read_file.return_value = b"STORED-JPEG"
     storage.write_file = AsyncMock()
     svc._storage_handler = storage
     return svc

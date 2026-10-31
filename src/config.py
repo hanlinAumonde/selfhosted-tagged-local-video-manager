@@ -19,8 +19,6 @@ class CachetoolsCacheConfig(BaseModel):
 
 
 class CacheConfig(BaseModel):
-    # Defaults to the in-process backend so a configuration that never mentions
-    # Redis never tries to reach one.
     cache_type: Literal["redis", "cachetools"] = "cachetools"
     key_prefix: str = "video-app"
     ttl: CacheTTLConfig = CacheTTLConfig()
@@ -99,7 +97,9 @@ class S3CategoryConfig(BaseModel):
 # The tag is what the registry looks up, so an unimplemented type is refused
 # while settings load rather than at a user's first request.
 HandlerConfig = Annotated[
-    LocalFSCategoryConfig | S3CategoryConfig, Field(discriminator="type")
+    LocalFSCategoryConfig | 
+    S3CategoryConfig,
+    Field(discriminator="type")
 ]
 
 
@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     ROOT_PATH: Optional[str] = None
     cache_config: CacheConfig = CacheConfig()
     ffmpeg_semaphore_limit: int = 4
+    io_thread_pool_size: int = 32
     page_size_default: PageSize = PageSize()
     suggestion_limit: SuggestionLimit = SuggestionLimit()
     video_extensions: list[str] = Field(default_factory=lambda: [".mp4"])

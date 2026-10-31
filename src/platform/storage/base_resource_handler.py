@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, ClassVar, Generator, Iterator
+from typing import TYPE_CHECKING, AsyncIterator, ClassVar
 
-from src.platform.storage.base_file_entry import BaseFileEntry
+from src.platform.storage.file_info import FileInfo
 
 if TYPE_CHECKING:
     from src.config import HandlerConfig, Settings
@@ -43,56 +42,51 @@ class BaseResourceHandler(ABC):
     # --- IO operations ---
 
     @abstractmethod
-    @contextmanager
-    def list_directory(self, path: str) -> Generator[Iterator[BaseFileEntry], None, None]:
+    async def list_directory(self, path: str) -> list[FileInfo]:
         """
-        List entries in a directory. Returns a context manager yielding BaseFileEntry iterator.
+        List the entries of one directory, with every field already read.
 
-        :param path: The path to the directory to list.
+        :param path: FS-format path of the directory to list.
         :type path: str
-        :return: A context manager yielding an iterator of BaseFileEntry objects representing the directory entries.
-        :rtype: Generator[Iterator[BaseFileEntry], None, None]
+        :return: One FileInfo per entry, directories included.
+        :rtype: list[FileInfo]
+        :raises FileNotFoundError: If there is no such directory.
         """
         ...
 
     @abstractmethod
-    def get_entry(self, path: str) -> BaseFileEntry:
+    async def walk(self, path: str) -> AsyncIterator[list[FileInfo]]:
         """
-        Get a single file/directory entry by its path (not via directory listing).
+        Every file and directory below ``path``, in batches.
 
-        :param path: The path to the file or directory.
+        Batches are the storage's natural unit — a directory for local storage, a listing
+        page for S3 — so a caller can check for cancellation or report progress between
+        them without paying a thread hop per file. Directories are reported too: an empty
+        one leaves no other trace, and a caller aggregating per directory must still see it.
+
+        :param path: FS-format path of the directory to walk.
         :type path: str
-        :return: The file or directory entry.
-        :rtype: BaseFileEntry
+        :return: An async iterator of batches of FileInfo.
+        :rtype: AsyncIterator[list[FileInfo]]
+        :raises FileNotFoundError: If there is no such directory.
+        """
+        raise NotImplementedError
+        yield  # Makes this an async generator, like every override.
+
+    @abstractmethod
+    async def stat(self, path: str) -> FileInfo | None:
+        """
+        Existence, size, mtime and type of one path, in a single round-trip.
+
+        :param path: FS-format path of the file or directory.
+        :type path: str
+        :return: The FileInfo, or None if nothing is at that path.
+        :rtype: FileInfo | None
         """
         ...
 
     @abstractmethod
-    def get_size(self, path: str) -> float:
-        """
-        Get the size of a file at the given path.
-
-        :param path: The path to the file.
-        :type path: str
-        :return: The size of the file in bytes.
-        :rtype: float
-        """
-        ...
-
-    @abstractmethod
-    def file_exists(self, path: str) -> bool:
-        """
-        Check if a file exists at the given path.
-
-        :param path: The path to the file.
-        :type path: str
-        :return: True if the file exists, False otherwise.
-        :rtype: bool
-        """
-        ...
-
-    @abstractmethod
-    def delete_file(self, path: str) -> None:
+    async def delete_file(self, path: str) -> None:
         """
         Delete the file at the given path.
 
@@ -102,7 +96,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def create_directory(self, path: str) -> None:
+    async def create_directory(self, path: str) -> None:
         """
         Create a directory at the given path.
 
@@ -118,7 +112,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def delete_directory(self, path: str) -> None:
+    async def delete_directory(self, path: str) -> None:
         """
         Remove the directory at the given path, which must hold nothing.
 
@@ -134,7 +128,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def is_directory_empty(self, path: str) -> bool:
+    async def is_directory_empty(self, path: str) -> bool:
         """
         Whether the directory holds nothing at all — no files, no sub-directories.
 
@@ -167,6 +161,18 @@ class BaseResourceHandler(ABC):
         """
         ...
 
+    @abstractmethod
+    async def read_file(self, path: str) -> bytes | None:
+        """
+        Read a whole small file (a thumbnail, say) in one round-trip.
+
+        :param path: FS-format path
+        :type path: str
+        :return: The content, or None if there is no such file.
+        :rtype: bytes | None
+        """
+        ...
+
     async def read_file_streaming(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
         """
         Read a file in a streaming manner, yielding chunks of data.
@@ -178,7 +184,10 @@ class BaseResourceHandler(ABC):
         :yield: Chunks of file data as bytes
         :rtype: AsyncIterator[bytes]
         """
-        total_size = self.get_size(path)
+        info = await self.stat(path)
+        if info is None:
+            raise FileNotFoundError(path)
+        total_size = info.size
         offset = 0
         while offset < total_size:
             length = min(chunk_size, total_size - offset)
@@ -212,7 +221,7 @@ class BaseResourceHandler(ABC):
         """
         ...
 
-    def get_available_space(self, path: str) -> int | None:
+    async def get_available_space(self, path: str) -> int | None:
         """
         Get the available space at the given path. Returns None if not applicable.
 

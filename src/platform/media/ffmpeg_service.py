@@ -269,7 +269,10 @@ class FFmpegService:
         :type stdin: asyncio.StreamWriter
         """
         try:
-            file_size = int(handler.get_size(fs_path))
+            file_info = await handler.stat(fs_path)
+            if file_info is None:
+                raise FileNotFoundError(fs_path)
+            file_size = int(file_info.size)
             offset = 0
             chunk_size = 1024 * 1024
             while offset < file_size:

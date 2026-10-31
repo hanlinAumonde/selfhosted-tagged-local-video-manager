@@ -103,7 +103,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             return
 
         _, target_handler, _, target_fs = self._resolve_paths(task)
-        self._cleanup_target(target_handler, target_fs)
+        await self._cleanup_target(target_handler, target_fs)
         task.set_progress(0)
 
     # ------------------------------------------------------------------
@@ -135,7 +135,8 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         source_fs = source_path.FS_format_path()
         target_dir_fs = target_dir_path.FS_format_path()
 
-        if not source_handler.file_exists(source_fs):
+        source_info = await source_handler.stat(source_fs)
+        if source_info is None:
             return MigrationPreflightResult(
                 valid=False,
                 source_file_size=0,
@@ -147,7 +148,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 error_message="source file does not exist",
             )
 
-        file_size = int(source_handler.get_size(source_fs))
+        file_size = int(source_info.size)
         filename = source_fs.rsplit("/", 1)[-1]
 
         target_file_fs = target_handler.join_path(target_dir_fs, filename)
@@ -156,11 +157,13 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         target_db = target_handler.convert_to_DB_format_path(target_file_fs)
         same_location = source_db == target_db
 
-        conflict_exists = target_handler.file_exists(target_file_fs) if not same_location else False
+        conflict_exists = (
+            not same_location and await target_handler.stat(target_file_fs) is not None
+        )
 
         already_migrating = await self._is_actively_migrating(source_db)
 
-        space_available = target_handler.get_available_space(target_dir_fs)
+        space_available = await target_handler.get_available_space(target_dir_fs)
         if space_available is not None:
             space_sufficient = space_available >= file_size
         else:
@@ -224,10 +227,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         source_fs = source_path.FS_format_path()
         target_dir_fs = target_dir_path.FS_format_path()
 
-        if not source_handler.file_exists(source_fs):
+        source_info = await source_handler.stat(source_fs)
+        if source_info is None:
             raise InputValidationError(field="source_path", issue="source file does not exist")
 
-        file_size = int(source_handler.get_size(source_fs))
+        file_size = int(source_info.size)
         filename = source_fs.rsplit("/", 1)[-1]
         file_name_no_ext = source_handler.get_filename_without_extension(filename)
 
@@ -236,11 +240,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         renamed_target_path: str | None = None
 
-        if target_handler.file_exists(target_file_fs):
+        if await target_handler.stat(target_file_fs) is not None:
             if conflict_strategy == "overwrite":
                 pass
             elif conflict_strategy == "rename":
-                target_file_fs = self._generate_unique_name(target_handler, target_dir_fs, filename)
+                target_file_fs = await self._generate_unique_name(target_handler, target_dir_fs, filename)
                 renamed_target_path = target_handler.convert_to_DB_format_path(target_file_fs)
             elif conflict_strategy == "skip":
                 raise InputValidationError(field="conflict_strategy", issue="user chose to skip, task not created")
@@ -464,7 +468,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         return count > 0
 
     @staticmethod
-    def _cleanup_target(handler: BaseResourceHandler, target_fs: str) -> None:
+    async def _cleanup_target(handler: BaseResourceHandler, target_fs: str) -> None:
         """
         Delete a partially written target file, best effort.
 
@@ -479,13 +483,13 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :rtype: None
         """
         try:
-            if handler.file_exists(target_fs):
-                handler.delete_file(target_fs)
+            if await handler.stat(target_fs) is not None:
+                await handler.delete_file(target_fs)
         except Exception as e:
             logger.warning(f"Failed to cleanup target file {target_fs}: {e}")
 
     @staticmethod
-    def _generate_unique_name(handler: BaseResourceHandler, dir_fs: str, filename: str) -> str:
+    async def _generate_unique_name(handler: BaseResourceHandler, dir_fs: str, filename: str) -> str:
         """
         Find a free ``name(n).ext`` variant in a directory, for the "rename" conflict
         strategy.
@@ -505,7 +509,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         counter = 1
         while True:
             candidate = handler.join_path(dir_fs, f"{name_no_ext}({counter}){suffix}")
-            if not handler.file_exists(candidate):
+            if await handler.stat(candidate) is None:
                 return candidate
             counter += 1
 
@@ -571,13 +575,13 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         try:
             await copy_task
         except _MigrationCancelled:
-            self._cleanup_target(target_handler, target_fs)
+            await self._cleanup_target(target_handler, target_fs)
             await self._update_task_status(task, TaskStatus.CANCELLED)
             self._cancel_requested.pop(task_id, None)
             yield self._make_progress(task, current=bytes_copied, message="cancelled")
             return
         except Exception:
-            self._cleanup_target(target_handler, target_fs)
+            await self._cleanup_target(target_handler, target_fs)
             raise
 
         await self._update_task_status(task, TaskStatus.PROCESS_DONE, bytes_transferred=task.file_size)
@@ -657,7 +661,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         warning = None
         try:
-            source_handler.delete_file(source_fs)
+            await source_handler.delete_file(source_fs)
         except Exception as e:
             warning = f"Source file deletion failed: {e}"
             logger.warning(f"Task {task.id}: {warning}")

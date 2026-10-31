@@ -298,7 +298,7 @@ async def test_a_batch_delete_by_directory_removes_the_deleted_videos_from_their
     # When a batch delete removes every video in that directory
     handler = local_resource_handler_service.get_handler(CATEGORY)
     entries = [
-        handler.get_entry(str(doomed_dir / f"{n}.mp4").replace("\\", "/"))
+        await handler.stat(str(doomed_dir / f"{n}.mp4").replace("\\", "/"))
         for n in ("a2", "b1")
     ]
     [_ async for _ in batch_svc.batch_delete(

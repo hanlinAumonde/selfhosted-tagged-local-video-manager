@@ -171,3 +171,21 @@ class TestPlatformStaysGeneric:
                 offenders[_relative(path)] = leaked
 
         assert offenders == {}, f"platform modules importing features: {offenders}"
+
+    # Scenario: the platform layer does not lean on the web framework for its threads
+    #   Given every module under src/platform
+    #   When their imports are scanned
+    #   Then none imports fastapi — the worker process has no FastAPI, and both processes
+    #       must offload IO the same way
+    def test_platform_does_not_import_fastapi(self):
+        offenders = sorted(
+            _relative(path)
+            for path in (SRC / "platform").rglob("*.py")
+            if "__pycache__" not in path.parts
+            and any(
+                name == "fastapi" or name.startswith("fastapi.")
+                for name in _imported_modules(path)
+            )
+        )
+
+        assert offenders == [], f"platform modules importing fastapi: {offenders}"

@@ -311,7 +311,7 @@ class DirMetadataService:
                                            collected: dict[str, tuple[float, float]],
                                            recursiveCalculation: bool) -> tuple[float, float]:
         """
-        Internal implementation of directory metadata calculation, which can be called recursively.
+        Internal implementation of directory metadata calculation.
 
         :param directory_path: The absolute path of the directory.
         :type directory_path: AbsolutePath
@@ -322,40 +322,89 @@ class DirMetadataService:
         :return: A tuple containing the total size and last modified time of the directory.
         :rtype: tuple[float, float]
         """
-        total_size = 0.0
-        last_modified_time = 0.0
-        category = directory_path.category
-
         try:
-            handler = self.resourceHandlerService.get_handler(category)
-            with handler.list_directory(directory_path.FS_format_path()) as entries:
-                for entry in entries:
-                    if entry.is_dir():
-                        sub_path = AbsolutePath.from_existing_path(
-                            path=entry.path, 
-                            category=category, 
-                            handler=handler
-                        )
-                        if recursiveCalculation:
-                            dir_size, dir_mtime = await self._calculate_directory_metadata_impl(
-                                sub_path, collected, recursiveCalculation
-                            )
-                        else:
-                            dir_size, dir_mtime = await self.get_metadata(category, sub_path.DB_format_path()) or (0.0, 0.0)
-                        collected[sub_path.DB_format_path()] = (dir_size, dir_mtime)
-                        total_size += dir_size
-                        last_modified_time = max(last_modified_time, dir_mtime)
-                    elif entry.is_file() and handler.is_video_file(entry.name):
-                        stat = entry.stat()
-                        total_size += stat.size
-                        last_modified_time = max(last_modified_time, stat.mtime)
-
+            if recursiveCalculation:
+                return await self._aggregate_tree(directory_path, collected)
+            return await self._aggregate_one_level(directory_path, collected)
         except (OSError, Exception):
             logger.exception(f"Error accessing directory {directory_path} to calculate size and last modified time.")
-            total_size = -1.0
-            last_modified_time = -1.0
+            return -1.0, -1.0
+
+    async def _aggregate_one_level(self,
+                                   directory_path: AbsolutePath,
+                                   collected: dict[str, tuple[float, float]]) -> tuple[float, float]:
+        """The directory's own videos, plus what is already stored for each sub-directory."""
+        category = directory_path.category
+        handler = self.resourceHandlerService.get_handler(category)
+        total_size = 0.0
+        last_modified_time = 0.0
+
+        for entry in await handler.list_directory(directory_path.FS_format_path()):
+            if entry.is_dir:
+                sub_db_path = AbsolutePath.from_existing_path(
+                    path=entry.path, category=category, handler=handler
+                ).DB_format_path()
+                dir_size, dir_mtime = await self.get_metadata(category, sub_db_path) or (0.0, 0.0)
+                collected[sub_db_path] = (dir_size, dir_mtime)
+            elif handler.is_video_file(entry.name):
+                dir_size, dir_mtime = entry.size, entry.mtime
+            else:
+                continue
+            total_size += dir_size
+            last_modified_time = max(last_modified_time, dir_mtime)
 
         return total_size, last_modified_time
+
+    async def _aggregate_tree(self,
+                              directory_path: AbsolutePath,
+                              collected: dict[str, tuple[float, float]]) -> tuple[float, float]:
+        """
+        Aggregate the whole tree from one walk, recording every sub-directory on the way.
+
+        Every directory the walk reveals gets an entry, video or not — reported ones and
+        the ones implied by a file's path alike. A directory left out would keep whatever
+        was stored for it before, so one emptied outside the app would come back in the
+        browser with a size it no longer has.
+        """
+        category = directory_path.category
+        handler = self.resourceHandlerService.get_handler(category)
+        root = directory_path.FS_format_path().rstrip("/")
+
+        # FS path -> [size, mtime] of the videos directly inside it.
+        own: dict[str, list[float]] = {root: [0.0, 0.0]}
+
+        def register(directory: str) -> None:
+            """Record a directory and every ancestor up to the root not yet seen."""
+            while directory not in own and len(directory) > len(root):
+                own[directory] = [0.0, 0.0]
+                directory = handler.dirname(directory)
+
+        async for batch in handler.walk(directory_path.FS_format_path()):
+            for entry in batch:
+                if entry.is_dir:
+                    register(entry.path.rstrip("/"))
+                    continue
+                parent = handler.dirname(entry.path)
+                register(parent)
+                if handler.is_video_file(entry.name) and parent in own:
+                    own[parent][0] += entry.size
+                    own[parent][1] = max(own[parent][1], entry.mtime)
+
+        # Deepest first, so each directory is complete before it is added to its parent.
+        for directory in sorted(own, key=lambda d: d.count("/"), reverse=True):
+            if directory == root:
+                continue
+            size, mtime = own[directory]
+            parent = own.get(handler.dirname(directory))
+            if parent is not None:
+                parent[0] += size
+                parent[1] = max(parent[1], mtime)
+            sub_db_path = AbsolutePath.from_existing_path(
+                path=directory, category=category, handler=handler
+            ).DB_format_path()
+            collected[sub_db_path] = (size, mtime)
+
+        return own[root][0], own[root][1]
 
     async def batch_update_metadata_forward(self, category: str, dir_db_paths: list[str]) -> None:
         """

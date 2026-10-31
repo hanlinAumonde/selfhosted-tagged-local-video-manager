@@ -38,7 +38,7 @@ async def test_get_thumbnail_file_missing_raises_404(
     thumb_svc, init_db, video_factory, handler,
 ):
     video = await video_factory(name="v")
-    handler.file_exists.return_value = False
+    handler.stat.return_value = None
 
     with pytest.raises(HTTPException) as exc_info:
         await thumb_svc.get_thumbnail(str(video.id))
@@ -85,9 +85,7 @@ async def test_stored_thumbnail_hit_returns_without_generating(
     await video.save()
 
     storage = thumb_svc_with_storage._storage_handler
-    storage.file_exists.return_value = True
-    storage.get_size.return_value = 1024
-    storage.read_file_chunk = AsyncMock(return_value=b"STORED-JPEG")
+    storage.read_file.return_value = b"STORED-JPEG"
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
 
@@ -104,7 +102,7 @@ async def test_stored_thumbnail_miss_falls_back_to_generation(
 
     storage = thumb_svc_with_storage._storage_handler
     # The video file check handler returns True, but the thumbnail doesn't exist.
-    storage.file_exists.return_value = False
+    storage.read_file.return_value = None
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
 
@@ -129,7 +127,7 @@ async def test_same_named_videos_in_different_dirs_get_distinct_keys(
     )
 
     storage = thumb_svc_with_storage._storage_handler
-    storage.file_exists.return_value = False
+    storage.read_file.return_value = None
 
     await thumb_svc_with_storage.get_thumbnail(str(first.id))
     await thumb_svc_with_storage.get_thumbnail(str(second.id))
@@ -149,7 +147,7 @@ async def test_storage_key_is_derived_from_video_id(
     video = await video_factory(name="v")
 
     storage = thumb_svc_with_storage._storage_handler
-    storage.file_exists.return_value = False
+    storage.read_file.return_value = None
 
     await thumb_svc_with_storage.get_thumbnail(str(video.id))
 
@@ -169,13 +167,12 @@ async def test_legacy_name_based_key_is_discarded_and_regenerated(
 
     storage = thumb_svc_with_storage._storage_handler
     # The legacy object is perfectly readable — it just may belong to another video.
-    storage.file_exists.return_value = True
-    storage.read_file_chunk = AsyncMock(return_value=b"WRONG-VIDEO-JPEG")
+    storage.read_file.return_value = b"WRONG-VIDEO-JPEG"
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
 
     assert response.media_type == "image/jpeg"
-    storage.read_file_chunk.assert_not_called()
+    storage.read_file.assert_not_called()
     ffmpeg_svc.generate_thumbnail.assert_called_once()
 
     refreshed = await VideoModel.get(video.id)
@@ -215,7 +212,7 @@ async def test_read_stored_thumbnail_exception_returns_none(
     await video.save()
 
     storage = thumb_svc_with_storage._storage_handler
-    storage.file_exists.side_effect = RuntimeError("disk failure")
+    storage.read_file.side_effect = RuntimeError("disk failure")
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
     assert response.media_type == "image/jpeg"
@@ -228,7 +225,7 @@ async def test_store_thumbnail_exception_does_not_raise(
     video = await video_factory(name="v")
 
     storage = thumb_svc_with_storage._storage_handler
-    storage.file_exists.return_value = False
+    storage.read_file.return_value = None
     storage.write_file = AsyncMock(side_effect=RuntimeError("write failure"))
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))

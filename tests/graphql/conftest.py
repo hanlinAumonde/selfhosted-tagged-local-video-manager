@@ -11,7 +11,6 @@ This conftest:
 """
 
 from collections.abc import AsyncGenerator
-from contextlib import contextmanager
 from typing import Any, Callable
 from unittest.mock import AsyncMock, MagicMock
 
@@ -30,6 +29,7 @@ from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.task_runner import TaskRunner
+from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.catalog_service import CatalogService
 from src.features.catalog.series_service import SeriesService
@@ -64,7 +64,8 @@ def schema():
 def mock_handler() -> MagicMock:
     """A mock BaseResourceHandler with reasonable defaults for path conversion."""
 
-    handler = MagicMock(name="ResourceHandler")
+    # Spec'd so every IO method is an AsyncMock, as the real coroutine it stands for.
+    handler = MagicMock(spec=BaseResourceHandler, name="ResourceHandler")
     # Identity-ish path conversions are good enough for resolvers that just
     # round-trip the string.  Tests that care about specific values can
     # override these.
@@ -82,11 +83,7 @@ def mock_handler() -> MagicMock:
             else f"{category}/{pseudo_name}{sub_path}"
         )
     )
-
-    @contextmanager
-    def _list_directory(path: str):
-        yield iter([])
-    handler.list_directory.side_effect = _list_directory
+    handler.list_directory.return_value = []
     return handler
 
 
@@ -129,7 +126,7 @@ def mock_dir_metadata_service() -> MagicMock:
 def mock_browse_file_service() -> MagicMock:
     svc = MagicMock(spec=BrowseFileService, name="BrowseFileService")
     svc.get_node_list_in_directory = AsyncMock(return_value=[])
-    svc.get_all_video_entries_in_directory = MagicMock(return_value=[])
+    svc.get_all_video_entries_in_directory = AsyncMock(return_value=[])
     svc.search_videos_in_directory = AsyncMock(return_value=[])
     svc.create_directory = AsyncMock(return_value="Test-category/Test-resource/new_folder")
     return svc

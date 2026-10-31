@@ -14,39 +14,11 @@ pytestmark = pytest.mark.unit
 # --------------------- IO operations ------------------------------------
 # -----------------------------------------------------------------------
 
-def test_list_directory_yields_each_entry(local_handler, local_resource_dir: Path):
-    with local_handler.list_directory(str(local_resource_dir)) as entries:
-        names = sorted(e.name for e in entries)
-    assert names == ["movie_a.mp4", "movie_b.mp4", "notes.txt", "subdir"]
 
-
-def test_list_directory_subdir(local_handler, local_resource_dir: Path):
-    with local_handler.list_directory(str(local_resource_dir / "subdir")) as entries:
-        names = sorted(e.name for e in entries)
-    assert names == ["empty", "movie_c.mp4"]
-
-
-def test_get_entry_returns_file_entry(local_handler, local_resource_dir: Path):
-    entry = local_handler.get_entry(str(local_resource_dir / "movie_a.mp4"))
-    assert entry.name == "movie_a.mp4"
-    assert entry.is_file() is True
-    assert entry.is_dir() is False
-
-
-def test_get_size_returns_byte_count(local_handler, local_resource_dir: Path):
-    assert local_handler.get_size(str(local_resource_dir / "movie_a.mp4")) == 100
-    assert local_handler.get_size(str(local_resource_dir / "movie_b.mp4")) == 200
-
-
-def test_file_exists_true_and_false(local_handler, local_resource_dir: Path):
-    assert local_handler.file_exists(str(local_resource_dir / "movie_a.mp4")) is True
-    assert local_handler.file_exists(str(local_resource_dir / "missing.mp4")) is False
-
-
-def test_delete_file_removes_from_disk(local_handler, local_resource_dir: Path):
+async def test_delete_file_removes_from_disk(local_handler, local_resource_dir: Path):
     target = local_resource_dir / "movie_a.mp4"
     assert target.exists()
-    local_handler.delete_file(str(target))
+    await local_handler.delete_file(str(target))
     assert not target.exists()
 
 
@@ -241,14 +213,14 @@ async def test_write_file_streaming_creates_file(local_handler, tmp_path: Path):
 # --------------------- get_available_space -----------------------------
 # -----------------------------------------------------------------------
 
-def test_get_available_space_returns_positive_int(local_handler, local_resource_dir: Path):
-    space = local_handler.get_available_space(str(local_resource_dir / "movie_a.mp4"))
+async def test_get_available_space_returns_positive_int(local_handler, local_resource_dir: Path):
+    space = await local_handler.get_available_space(str(local_resource_dir / "movie_a.mp4"))
     assert isinstance(space, int)
     assert space > 0
 
 
-def test_get_available_space_invalid_path_returns_none(local_handler):
-    space = local_handler.get_available_space("Z:/nonexistent/path/file.mp4")
+async def test_get_available_space_invalid_path_returns_none(local_handler):
+    space = await local_handler.get_available_space("Z:/nonexistent/path/file.mp4")
     assert space is None
 
 

@@ -219,23 +219,23 @@ async def test_directories_lead_the_listing_then_video_files(
 # ------------------- get_all_video_entries_in_directory ------------------
 # -----------------------------------------------------------------------
 
-def test_get_all_video_entries_recursive(
+async def test_get_all_video_entries_recursive(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     handler = local_resource_handler_service.get_handler("Test-category")
     root_fs = str(local_resource_dir).replace("\\", "/")
 
-    entries = browse_svc.get_all_video_entries_in_directory(root_fs, "Test-category")
+    entries = await browse_svc.get_all_video_entries_in_directory(root_fs, "Test-category")
     names = sorted(e.name for e in entries)
 
     assert names == ["movie_a.mp4", "movie_b.mp4", "movie_c.mp4"]
 
 
-def test_get_all_video_entries_empty_dir(
+async def test_get_all_video_entries_empty_dir(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     empty = str(local_resource_dir / "subdir" / "empty").replace("\\", "/")
-    entries = browse_svc.get_all_video_entries_in_directory(empty, "Test-category")
+    entries = await browse_svc.get_all_video_entries_in_directory(empty, "Test-category")
     assert entries == []
 
 
@@ -243,10 +243,10 @@ def test_get_all_video_entries_empty_dir(
 # ------------------- Error paths ----------------------------------------
 # -----------------------------------------------------------------------
 
-def test_get_all_video_entries_os_error_returns_empty(
+async def test_get_all_video_entries_os_error_returns_empty(
     browse_svc, local_resource_handler_service,
 ):
-    entries = browse_svc.get_all_video_entries_in_directory(
+    entries = await browse_svc.get_all_video_entries_in_directory(
         "Z:/nonexistent/path", "Test-category",
     )
     assert entries == []

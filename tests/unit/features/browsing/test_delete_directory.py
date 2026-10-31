@@ -80,7 +80,7 @@ async def _delete_all(
     directory: Path, strategy: DirectoryDeletionStrategy,
 ) -> list:
     """Run a delete-all over a directory the way the subscription resolver does."""
-    entries = browse_svc.get_all_video_entries_in_directory(
+    entries = await browse_svc.get_all_video_entries_in_directory(
         str(directory).replace("\\", "/"), CATEGORY
     )
     return await _collect(
