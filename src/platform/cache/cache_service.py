@@ -1,31 +1,40 @@
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 from src.config import CacheConfig
 from src.platform.cache.base_cache import BaseCache, K, V
 from src.platform.cache.cachetools_cache import CachetoolsCache
+from src.platform.cache.redis_cache import RedisCache
+
+# Keyed by CacheConfig.cache_type; its Literal already refuses unknown names at load time.
+_CACHE_TYPES: dict[str, type[CachetoolsCache] | type[RedisCache]] = {
+    "cachetools": CachetoolsCache,
+    "redis": RedisCache,
+}
+
 
 class CacheService(BaseCache[K, V]):
     """Cache service that delegates to a concrete cache implementation based on config."""
 
     def __init__(self, config: CacheConfig):
-        self._impl = self._create_impl(config.cache_type, config.max_size, config.ttl)
+        self._impl: BaseCache = _CACHE_TYPES[config.cache_type].from_config(config)
 
-    @staticmethod
-    def _create_impl(cache_type: str, maxsize: int, ttl: int) -> BaseCache:
-        if cache_type == "cachetools":
-            return CachetoolsCache(maxsize=maxsize, ttl=ttl)
-        raise ValueError(f"Unsupported cache type: {cache_type}")
+    async def get(self, key: K) -> Optional[Any]:
+        return await self._impl.get(key)
 
-    def get(self, key: K) -> Optional[V]:
-        return self._impl.get(key)
+    async def set(self, key: K, value: V, ttl: int) -> None:
+        await self._impl.set(key, value, ttl)
 
-    def set(self, key: K, value: V) -> None:
-        self._impl.set(key, value)
+    async def set_many(self, items: Mapping[K, V], ttl: int) -> None:
+        await self._impl.set_many(items, ttl)
 
-    def delete(self, key: K) -> None:
-        self._impl.delete(key)
+    async def delete(self, key: K) -> None:
+        await self._impl.delete(key)
 
-    def contains(self, key: K) -> bool:
-        return self._impl.contains(key)
+    async def contains(self, key: K) -> bool:
+        return await self._impl.contains(key)
 
-    def clear(self) -> None:
-        self._impl.clear()
+    async def clear(self) -> None:
+        await self._impl.clear()
+
+    async def close(self) -> None:
+        await self._impl.close()
