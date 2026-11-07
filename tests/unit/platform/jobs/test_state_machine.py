@@ -9,114 +9,20 @@ still needs migration's shape, these tests are what will say so.
 
 import asyncio
 import inspect
-import time
 
 import pytest
-import pytest_asyncio
-from beanie import init_beanie
 
-from src.features.migration.migration_task import MigrationTaskModel
 from src.platform.jobs import state_machine as state_machine_module
-from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.state_machine import TaskStateMachine
-from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
+from src.platform.jobs.task_model import TaskStatus
+from tests.unit.platform.jobs.reindex import (
+    CompensatingReindexStateMachine,
+    ReindexStateMachine,
+    ReindexTaskModel,
+    drain as _drain,
+)
 
 pytestmark = pytest.mark.unit
-
-
-# =======================================================================
-# A second task type, deliberately unlike migration
-# =======================================================================
-
-class ReindexTaskModel(BaseTaskModel):
-    """Rebuilds a search index. Touches no filesystem and has no notion of a target path."""
-
-    documents_total: int
-    documents_done: int = 0
-
-    def get_progress(self) -> tuple[int, int]:
-        return self.documents_done, self.documents_total
-
-    def set_progress(self, current: int) -> None:
-        self.documents_done = current
-
-    class Settings:
-        name = "reindex_tasks"
-
-
-class ReindexStateMachine(TaskStateMachine[ReindexTaskModel]):
-    """Minimal executor: records which phases ran, and can be told to blow up in one."""
-
-    task_model = ReindexTaskModel
-
-    def __init__(self, fail_in: str | None = None, **kwargs):
-        super().__init__(**kwargs)
-        self.phases_run: list[str] = []
-        self.compensated: list[tuple[str, TaskStatus]] = []
-        self.fail_in = fail_in
-
-    async def _execute_processing(self, task: ReindexTaskModel):
-        self.phases_run.append("processing")
-        await self._update_task_status(task, TaskStatus.PROCESSING)
-        if self.fail_in == "processing":
-            raise RuntimeError("indexer crashed")
-        yield self._make_progress(task, current=task.documents_total, message="indexed")
-        await self._update_task_status(task, TaskStatus.PROCESS_DONE)
-
-    async def _execute_db_update(self, task: ReindexTaskModel) -> None:
-        self.phases_run.append("db")
-        await self._update_task_status(task, TaskStatus.UPDATING_DB)
-        if self.fail_in == "db":
-            raise RuntimeError("index swap failed")
-        await self._update_task_status(task, TaskStatus.DB_UPDATED)
-
-    async def _execute_fs_cleanup(self, task: ReindexTaskModel) -> str | None:
-        self.phases_run.append("fs")
-        await self._update_task_status(task, TaskStatus.COMPLETED)
-        return None
-
-
-class CompensatingReindexStateMachine(ReindexStateMachine):
-    """Overrides the recovery hook to prove the template calls it."""
-
-    async def _compensate_before_resume(
-        self, task: ReindexTaskModel, start_from: TaskStatus
-    ) -> None:
-        self.compensated.append((str(task.id), start_from))
-
-
-# =======================================================================
-# Fixtures
-# =======================================================================
-
-@pytest_asyncio.fixture
-async def reindex_db(init_db):
-    """Register the test-only task model against the same test database."""
-    database = MigrationTaskModel.get_pymongo_collection().database
-    await init_beanie(database=database, document_models=[ReindexTaskModel])
-    yield
-    await ReindexTaskModel.delete_all()
-
-
-@pytest_asyncio.fixture
-def reindex_task_factory(reindex_db):
-    async def _create(**kwargs) -> ReindexTaskModel:
-        now = time.time()
-        defaults = {
-            "documents_total": 10,
-            "status": TaskStatus.PENDING,
-            "created_at": now,
-            "updated_at": now,
-        }
-        defaults.update(kwargs)
-        task = ReindexTaskModel(**defaults)
-        await task.insert()
-        return task
-    return _create
-
-
-async def _drain(machine: TaskStateMachine, task_id: str, **kwargs) -> list[ProgressFrame]:
-    return [frame async for frame in machine.run_task(task_id, **kwargs)]
 
 
 # =======================================================================
@@ -150,11 +56,11 @@ class TestGenericTaskType:
         assert indexed.total == 10
         assert indexed.percentage == 100.0
 
-    async def test_start_from_skips_the_earlier_phases(self, reindex_task_factory):
+    async def test_resume_point_skips_the_earlier_phases(self, reindex_task_factory):
         machine = ReindexStateMachine()
-        task = await reindex_task_factory(status=TaskStatus.DB_UPDATED)
+        task = await reindex_task_factory(resume_from=TaskStatus.DELETING_SOURCE)
 
-        await _drain(machine, str(task.id), start_from=TaskStatus.DELETING_SOURCE)
+        await _drain(machine, str(task.id))
 
         assert machine.phases_run == ["fs"]
 
@@ -218,8 +124,10 @@ class TestRecoveryCompensation:
 
         plan = await ReindexStateMachine().plan_recovery()
 
-        assert plan == [(str(task.id), TaskStatus.DELETING_SOURCE)]
-        assert (await ReindexTaskModel.get(task.id)).status == TaskStatus.PENDING
+        assert plan == [str(task.id)]
+        stored = await ReindexTaskModel.get(task.id)
+        assert stored.status == TaskStatus.PENDING
+        assert stored.resume_from == TaskStatus.DELETING_SOURCE
 
     async def test_compensation_hook_defaults_to_doing_nothing(self, reindex_task_factory):
         """A task type with no side effects to undo needs no recovery code at all."""
@@ -283,14 +191,3 @@ class TestTemplateHasNoMigrationKnowledge:
             "bytes_transferred",
         ):
             assert forbidden not in source, f"{forbidden} leaked into the generic template"
-
-    def test_runner_has_no_default_executor(self):
-        """A scheduler that defaults to "migration" is not a scheduler, it is migration's.
-        Callers must name the executor they want."""
-        from src.platform.jobs.task_runner import TaskRunner
-
-        for method in (TaskRunner.submit, TaskRunner.observe):
-            default = inspect.signature(method).parameters["executor_key"].default
-            assert default is inspect.Parameter.empty, (
-                f"{method.__name__} still defaults executor_key to {default!r}"
-            )

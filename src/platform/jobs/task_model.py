@@ -53,6 +53,16 @@ class BaseTaskModel(Document):
     updated_at: float
     completed_at: Optional[float] = None
 
+    # Phase a PENDING task starts at when it is claimed. Stored rather than carried in the
+    # queue message so a redelivered message, a recovery and a retry all agree on it.
+    resume_from: Optional[str] = None
+
+    # Set by the web process; the worker reads it back on its next progress flush.
+    cancel_requested: bool = False
+
+    # Last time the task id was put on its queue; reconciliation re-sends stale ones.
+    dispatched_at: Optional[float] = None
+
     @abstractmethod
     def get_progress(self) -> tuple[int, int]:
         """

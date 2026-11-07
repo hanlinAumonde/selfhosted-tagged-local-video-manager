@@ -1,16 +1,19 @@
 import asyncio
 from collections.abc import Iterable
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
 import time
 from typing import AsyncGenerator
 
 import pymongo
+from beanie.operators import Set
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
+from src.features.migration.device_slots import DeviceSlots
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.features.catalog.series_service import SeriesService
@@ -22,8 +25,8 @@ from src.platform.storage.base_resource_handler import BaseResourceHandler
 
 logger = get_logger("migration_service")
 
-#: Key this service is registered under in ``TaskRunner``, and the one callers pass to
-#: submit or observe a migration. Shared so the string is written down exactly once.
+#: Key this service is registered under in the ``PathLockRegistry``. Shared so the string
+#: is written down exactly once.
 MIGRATION_EXECUTOR_KEY = "migration"
 
 
@@ -49,11 +52,33 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         dir_metadata_service: DirMetadataService,
         series_service: SeriesService,
         progress_flush_interval: float = 3.0,
+        copy_slots: DeviceSlots | None = None,
     ):
+        """
+        :param copy_slots: Limits concurrent copies in total and per device. Only the
+            worker that runs migrations needs it; the web process, which only creates,
+            lists and cancels them, leaves it out.
+        :type copy_slots: DeviceSlots | None
+        """
         super().__init__(progress_flush_interval=progress_flush_interval)
         self.resourceHandlerService = resource_handler_service
         self.dirMetadataService = dir_metadata_service
         self.seriesService = series_service
+        self.copy_slots = copy_slots
+
+    def _processing_slot(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
+        """
+        Hold a copy slot on the source's and the target's device while the file copies.
+
+        :param task: The PENDING task about to be claimed.
+        :type task: MigrationTaskModel
+        :return: The slots to hold, or nothing when this service has no limits.
+        :rtype: AbstractAsyncContextManager
+        """
+        if self.copy_slots is None:
+            return nullcontext()
+        target_db = task.renamed_target_path or task.target_path
+        return self.copy_slots.hold(self.copy_slots.devices_of(task.source_path, target_db))
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -200,7 +225,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         """
         Persist a PENDING migration task, resolving any name conflict up front.
 
-        Only creates the record — call ``TaskRunner.submit`` to actually run it. The
+        Only creates the record — dispatch it to the migration queue to actually run it. The
         conflict strategy is applied here rather than at execution time so the final
         target path is fixed and visible before any bytes move.
 
@@ -283,47 +308,62 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         """
         Ask a task to stop.
 
-        A PENDING task is settled immediately, since nothing has happened yet; whichever
-        worker later pops it from the queue sees the terminal status and skips it. A
-        PROCESSING task can only be stopped cooperatively, so the flag is raised and the
-        copy loop unwinds itself at the next chunk boundary, cleaning up as it goes.
+        Runs in the web process, which shares no memory with the worker, so both outcomes
+        are a single conditional write to the task document:
 
-        The flag is raised in both cases, to also cover the narrow window where a task has
-        just left the queue but has not started copying yet.
+        * PENDING — settled as CANCELLED on the spot. The worker's claim then misses, so
+          the task never starts, even if its message is already on the queue.
+        * PROCESSING — ``cancel_requested`` is raised. The worker reads it back on its next
+          progress flush and unwinds the copy, cleaning up as it goes.
+
+        The two writes are tried in that order, so a task the worker claims in between
+        still ends up flagged.
 
         :param task_id: String form of the task's ObjectId.
         :type task_id: str
         :return: The task document. For a PROCESSING task the status still reads
             PROCESSING — cancellation completes asynchronously.
         :rtype: MigrationTaskModel
-        :raises InputValidationError: If the task does not exist, or has already settled.
+        :raises InputValidationError: If the task does not exist, or is past the copy.
         """
-        task = await MigrationTaskModel.get(ObjectId(task_id))
-        if task is None:
-            raise InputValidationError(field="task_id", issue="task does not exist")
-        if task.status not in (TaskStatus.PENDING, TaskStatus.PROCESSING):
-            raise InputValidationError(field="task_id", issue=f"current status does not allow cancellation: {task.status}")
+        model = MigrationTaskModel
+        oid = ObjectId(task_id)
+        now = time.time()
 
-        if task.status == TaskStatus.PENDING:
-            await self._update_task_status(task, TaskStatus.CANCELLED)
+        settled = await model.find_one(
+            model.id == oid, model.status == TaskStatus.PENDING
+        ).update(Set({
+            model.status: TaskStatus.CANCELLED,
+            model.updated_at: now,
+            model.completed_at: now,
+        }))
+        if not settled.matched_count:
+            flagged = await model.find_one(
+                model.id == oid, model.status == TaskStatus.PROCESSING
+            ).update(Set({model.cancel_requested: True}))
+            if not flagged.matched_count:
+                task = await MigrationTaskModel.get(oid)
+                if task is None:
+                    raise InputValidationError(field="task_id", issue="task does not exist")
+                raise InputValidationError(field="task_id", issue=f"current status does not allow cancellation: {task.status}")
 
-        self.request_cancel(str(task.id))
-        return task
+        return await MigrationTaskModel.get(oid)
 
     async def prepare_retry(self, task_id: str) -> TaskStatus:
         """
         Validate a retry request and reset the task so it can be queued again.
 
-        Clears the previous failure, puts the task back to PENDING and returns the phase to
-        resume at, derived from the recorded ``failed_step``. Nothing is executed here —
-        the caller passes the returned phase to ``TaskRunner.submit``.
+        Clears the previous failure and stores the task back as PENDING with the phase to
+        resume at in ``resume_from``, derived from the recorded ``failed_step``. Nothing is
+        executed here — the caller dispatches the task, and the worker reads the resume
+        point off the document when it claims it.
 
         When the resume point is PROCESSING, any partial file from the failed attempt is
         removed and the byte counter zeroed first, so the copy restarts clean.
 
         :param task_id: String form of the task's ObjectId.
         :type task_id: str
-        :return: The phase the runner should resume from. Falls back to PROCESSING if
+        :return: The phase the task will resume at. Falls back to PROCESSING if
             ``failed_step`` is absent or unparsable.
         :rtype: TaskStatus
         :raises InputValidationError: If the task does not exist or is not FAILED.
@@ -345,15 +385,19 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         # Same rewind a crash recovery does, so a retry and a restart leave the task in
         # exactly the same state before it is queued again.
+        before = self._dump(task)
         await self._compensate_before_resume(task, start_from)
 
-        task.status = TaskStatus.PENDING
-        task.error_message = None
-        task.failed_step = None
-        task.completed_at = None
-        task.updated_at = time.time()
-        await task.save()
-
+        await task.set({
+            **self._changed_fields(before, task),
+            MigrationTaskModel.status: TaskStatus.PENDING,
+            MigrationTaskModel.resume_from: start_from,
+            MigrationTaskModel.cancel_requested: False,
+            MigrationTaskModel.error_message: None,
+            MigrationTaskModel.failed_step: None,
+            MigrationTaskModel.completed_at: None,
+            MigrationTaskModel.updated_at: time.time(),
+        })
         return start_from
 
     async def list_tasks(
@@ -584,7 +628,15 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             await self._cleanup_target(target_handler, target_fs)
             raise
 
-        await self._update_task_status(task, TaskStatus.PROCESS_DONE, bytes_transferred=task.file_size)
+        if not await self._finish_processing(task, bytes_transferred=task.file_size):
+            # Cancelled after the last chunk was read: the copy is complete, but the user
+            # was told it would stop, so it is undone rather than kept.
+            await self._cleanup_target(target_handler, target_fs)
+            await self._update_task_status(task, TaskStatus.CANCELLED)
+            self._cancel_requested.pop(task_id, None)
+            yield self._make_progress(task, current=bytes_copied, message="cancelled")
+            return
+
         yield self._make_progress(task, current=task.file_size, message="Copy completed")
 
     # ------------------------------------------------------------------

@@ -63,10 +63,27 @@ class LoggingConfig(BaseModel):
 
 
 class TaskConfig(BaseModel):
-    # How many background tasks may run at the same time.
-    max_concurrent: int = 2
-    # How often (seconds) a running task flushes its progress to MongoDB.
-    progress_flush_interval: float = 3.0
+    # Redis that carries task queues and progress between the web process and workers.
+    redis_url: str = "redis://localhost:6379/0"
+    # How many migrations may copy at the same time, across every device.
+    max_concurrent: int = 4
+    # Copies allowed at once on one device, by storage type. Several copies on one
+    # spinning disk are slower in total than one. Only a default: see device_limits.
+    slots_per_device: dict[str, int] = Field(default_factory=lambda: {"local_fs": 1, "s3": 2})
+    # "category/pseudo_name" -> device name, for mounts that share a physical disk. The
+    # code cannot tell two mounts are one disk; undeclared, each mount is its own device.
+    devices: dict[str, str] = Field(default_factory=dict)
+    # Device name -> copies allowed at once, overriding slots_per_device. The storage type
+    # cannot tell a solid-state disk from a spinning one. Keyed by device rather than by
+    # mount, so mounts sharing a device can never disagree on its limit.
+    device_limits: dict[str, int] = Field(default_factory=dict)
+    # How often (seconds) a running task flushes its progress to MongoDB. Also bounds how
+    # long a cancel request takes to reach a running task.
+    progress_flush_interval: float = 1.0
+    # Seconds without a progress frame before an observer checks the database.
+    observe_watchdog_interval: float = 10.0
+    # How often (seconds) a worker re-sends PENDING tasks whose message may have been lost.
+    reconcile_interval: float = 300.0
 
 
 class S3HandlerConfig(BaseModel):

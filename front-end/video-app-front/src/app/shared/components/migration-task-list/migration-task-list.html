@@ -96,10 +96,17 @@
             <span>{{ formatSize(task.fileSize) }} · {{ formatTime(task.createdAt) }}</span>
             <div class="flex gap-2">
               @if (canCancel(getLiveStatus(task))) {
-                <button mat-stroked-button class="text-sm!" (click)="cancelTask(task.id)">
-                  <mat-icon fontIcon="cancel" class="text-base!"></mat-icon>
-                  Cancel
-                </button>
+                @if (isCancelling(task.id)) {
+                  <button mat-stroked-button class="text-sm!" disabled>
+                    <mat-icon fontIcon="hourglass_top" class="text-base!"></mat-icon>
+                    Cancelling…
+                  </button>
+                } @else {
+                  <button mat-stroked-button class="text-sm!" (click)="cancelTask(task.id)">
+                    <mat-icon fontIcon="cancel" class="text-base!"></mat-icon>
+                    Cancel
+                  </button>
+                }
               }
               @if (canRetry(getLiveStatus(task))) {
                 <button mat-stroked-button class="text-sm!" (click)="retryTask(task)">

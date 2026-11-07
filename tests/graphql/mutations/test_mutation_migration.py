@@ -4,11 +4,11 @@ import time
 
 import pytest
 
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY
 from unittest.mock import AsyncMock
 
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.features.migration.migration_service import MigrationPreflightResult
+from src.platform.jobs.progress import ProgressFrame
 from tests.graphql.helpers import (
     MIGRATION_PREFLIGHT,
     CREATE_MIGRATION_TASK,
@@ -120,8 +120,8 @@ class TestCreateMigrationTask:
         assert data["task"]["fileName"] == "movie"
         assert data["task"]["status"] == "PENDING"
 
-    async def test_create_task_is_handed_to_the_runner(
-        self, execute_gql, mock_migration_service, mock_task_runner, video_factory,
+    async def test_create_task_is_handed_to_the_worker_queue(
+        self, execute_gql, mock_migration_service, mock_migration_dispatcher, video_factory,
     ):
         """Regression: a created task must start on its own, without the client
         opening the progress subscription first."""
@@ -148,9 +148,7 @@ class TestCreateMigrationTask:
             }
         })
         assert_no_errors(result)
-        mock_task_runner.submit.assert_awaited_once_with(
-            str(mock_task.id), executor_key=MIGRATION_EXECUTOR_KEY
-        )
+        mock_migration_dispatcher.submit.assert_awaited_once_with(str(mock_task.id))
 
     async def test_create_task_with_conflict_strategy(
         self, execute_gql, mock_migration_service, video_factory,
@@ -214,3 +212,63 @@ class TestCancelMigrationTask:
         data = result.data["cancelMigrationTask"]
         assert data["success"] is True
         assert data["task"]["status"] == "CANCELLED"
+
+
+class TestCancelAnnouncesWhatItSettled:
+    """A task cancelled while still queued never reaches the worker, so the worker never
+    sends its final frame. Whoever settles a task announces it."""
+
+    # Scenario: cancelling a queued task tells every observer at once
+    #   Given a migration service whose cancel_task settles task "T" as CANCELLED
+    #   And whose snapshot of "T" is a CANCELLED frame
+    #   When cancelMigrationTask is called for "T"
+    #   Then that CANCELLED frame is published for "T"
+    async def test_cancelling_a_queued_task_publishes_its_cancelled_frame(
+        self, execute_gql, mock_migration_service, mock_progress_publisher,
+    ):
+        mock_migration_service.cancel_task = AsyncMock(
+            return_value=_task_with_status(TaskStatus.CANCELLED)
+        )
+        frame = ProgressFrame(task_id=_TASK_ID, status="CANCELLED", current=0, total=1000)
+        mock_migration_service.build_snapshot = AsyncMock(return_value=frame)
+
+        result = await execute_gql(CANCEL_MIGRATION_TASK, {"input": {"taskId": _TASK_ID}})
+
+        assert_no_errors(result)
+        mock_migration_service.build_snapshot.assert_awaited_once_with(_TASK_ID)
+        mock_progress_publisher.publish.assert_awaited_once_with(frame)
+
+    # Scenario: cancelling a running task leaves the announcement to the worker
+    #   Given a migration service whose cancel_task leaves task "T" PROCESSING with the flag raised
+    #   When cancelMigrationTask is called for "T"
+    #   Then no frame is published
+    async def test_cancelling_a_running_task_publishes_nothing(
+        self, execute_gql, mock_migration_service, mock_progress_publisher,
+    ):
+        mock_migration_service.cancel_task = AsyncMock(
+            return_value=_task_with_status(TaskStatus.PROCESSING)
+        )
+
+        result = await execute_gql(CANCEL_MIGRATION_TASK, {"input": {"taskId": _TASK_ID}})
+
+        assert_no_errors(result)
+        mock_progress_publisher.publish.assert_not_awaited()
+
+
+_TASK_ID = "507f1f77bcf86cd799439011"
+
+
+def _task_with_status(status: TaskStatus) -> MigrationTaskModel:
+    now = time.time()
+    return MigrationTaskModel(
+        source_path="Test-category/Test-resource/movie.mp4",
+        source_category="Test-category",
+        target_path="Target-category/Target-resource/movie.mp4",
+        target_category="Target-category",
+        file_name="movie",
+        file_size=1000,
+        status=status,
+        cancel_requested=status == TaskStatus.PROCESSING,
+        created_at=now,
+        updated_at=now,
+    )

@@ -18,8 +18,10 @@ from src.schema.types.migration_type import (
 )
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.catalog_service import CatalogService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
-from src.platform.jobs.task_runner import TaskRunner
+from src.features.migration.migration_service import MigrationService
+from src.platform.jobs.dispatch import TaskDispatcher
+from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.absolute_path import AbsolutePath
 
 logger = get_logger("migration_resolver")
@@ -132,10 +134,8 @@ async def resolve_create_migration_task(
     service: MigrationService = get_context_value(info, ContextEnum.MIGRATION_SERVICE)
     task = await service.create_task(source_path, target_dir_path, validated.conflict_strategy)
 
-    # Hand the task straight to the background runner: execution must not depend on a
-    # client ever opening the progress subscription.
-    runner: TaskRunner = get_context_value(info, ContextEnum.TASK_RUNNER)
-    await runner.submit(str(task.id), executor_key=MIGRATION_EXECUTOR_KEY)
+    dispatcher: TaskDispatcher = get_context_value(info, ContextEnum.MIGRATION_DISPATCHER)
+    await dispatcher.submit(str(task.id))
 
     return MigrationTaskMutationResult(
         success=True,
@@ -166,6 +166,16 @@ async def resolve_cancel_migration_task(
 
     service: MigrationService = get_context_value(info, ContextEnum.MIGRATION_SERVICE)
     task = await service.cancel_task(validated.task_id)
+
+    # A queued task is settled right here and no worker will ever run it, so nobody else
+    # would send its final frame; observers would wait for their watchdog. A running task
+    # is still PROCESSING here, and the worker announces its end once it stops.
+    if task.status == TaskStatus.CANCELLED:
+        publisher: ProgressPublisher = get_context_value(info, ContextEnum.PROGRESS_PUBLISHER)
+        frame = await service.build_snapshot(validated.task_id)
+        if frame is not None:
+            await publisher.publish(frame)
+
     return MigrationTaskMutationResult(
         success=True,
         task=MigrationTask.from_model(task),
@@ -196,10 +206,9 @@ async def resolve_migration_progress(
         logger.exception(f"Input validation error: {e}")
         raise InputValidationError(field="MigrationTaskActionInput", issue="Invalid input data")
 
-    # Observing is a pure read — it never starts or restarts the job, so refreshing the
-    # page or opening several tabs is harmless.
-    runner: TaskRunner = get_context_value(info, ContextEnum.TASK_RUNNER)
-    async for status in runner.observe(validated.task_id, executor_key=MIGRATION_EXECUTOR_KEY):
+    service: MigrationService = get_context_value(info, ContextEnum.MIGRATION_SERVICE)
+    bus: ProgressBus = get_context_value(info, ContextEnum.PROGRESS_BUS)
+    async for status in bus.observe(validated.task_id, service.build_snapshot):
         yield MigrationProgressStatus.from_service(status)
 
 
@@ -225,14 +234,14 @@ async def resolve_migration_retry(
         raise InputValidationError(field="MigrationTaskActionInput", issue="Invalid input data")
 
     service: MigrationService = get_context_value(info, ContextEnum.MIGRATION_SERVICE)
-    runner: TaskRunner = get_context_value(info, ContextEnum.TASK_RUNNER)
+    dispatcher: TaskDispatcher = get_context_value(info, ContextEnum.MIGRATION_DISPATCHER)
+    bus: ProgressBus = get_context_value(info, ContextEnum.PROGRESS_BUS)
 
-    start_from = await service.prepare_retry(validated.task_id)
-    await runner.submit(
-        validated.task_id, executor_key=MIGRATION_EXECUTOR_KEY, start_from=start_from
-    )
+    # The resume point is stored on the task; the worker reads it when it claims the task.
+    await service.prepare_retry(validated.task_id)
+    await dispatcher.submit(validated.task_id)
 
-    async for status in runner.observe(validated.task_id, executor_key=MIGRATION_EXECUTOR_KEY):
+    async for status in bus.observe(validated.task_id, service.build_snapshot):
         yield MigrationProgressStatus.from_service(status)
 
 

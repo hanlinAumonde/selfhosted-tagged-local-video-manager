@@ -28,7 +28,8 @@ from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
 from src.platform.jobs.path_locks import PathLockRegistry
-from src.platform.jobs.task_runner import TaskRunner
+from src.platform.jobs.dispatch import TaskDispatcher
+from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.catalog_service import CatalogService
@@ -162,20 +163,35 @@ def mock_migration_service() -> MagicMock:
     svc.list_tasks = MigrationService.list_tasks.__get__(svc, MigrationService)
     svc.is_file_locked = AsyncMock(return_value=False)
     svc.prepare_retry = AsyncMock(return_value=TaskStatus.PROCESSING)
+    svc.build_snapshot = AsyncMock(return_value=None)
     return svc
 
 
 @pytest.fixture
-def mock_task_runner() -> MagicMock:
-    """By default the runner accepts submissions and observes nothing."""
-    runner = MagicMock(spec=TaskRunner, name="TaskRunner")
-    runner.submit = AsyncMock(return_value=None)
+def mock_migration_dispatcher() -> MagicMock:
+    """Accepts submissions; the queue and the worker behind it are out of scope here."""
+    dispatcher = MagicMock(spec=TaskDispatcher, name="TaskDispatcher")
+    dispatcher.submit = AsyncMock(return_value=None)
+    return dispatcher
+
+
+@pytest.fixture
+def mock_progress_publisher() -> MagicMock:
+    publisher = MagicMock(spec=ProgressPublisher, name="ProgressPublisher")
+    publisher.publish = AsyncMock(return_value=None)
+    return publisher
+
+
+@pytest.fixture
+def mock_progress_bus() -> MagicMock:
+    """By default observes nothing, as for a task whose stream has already ended."""
+    bus = MagicMock(spec=ProgressBus, name="ProgressBus")
 
     async def _empty(*_a, **_kw):
         if False:
             yield
-    runner.observe.side_effect = _empty
-    return runner
+    bus.observe.side_effect = _empty
+    return bus
 
 
 # -----------------------------------------------------------------------
@@ -254,7 +270,9 @@ def graphql_context(
     mock_browse_file_service: MagicMock,
     mock_batch_operation_service: MagicMock,
     mock_migration_service: MagicMock,
-    mock_task_runner: MagicMock,
+    mock_migration_dispatcher: MagicMock,
+    mock_progress_bus: MagicMock,
+    mock_progress_publisher: MagicMock,
 ) -> dict[ContextEnum, Any]:
     """Context dict matching ``src.context.get_context``'s return shape."""
     return {
@@ -270,7 +288,9 @@ def graphql_context(
         ContextEnum.BATCH_OPERATION_SERVICE: mock_batch_operation_service,
         ContextEnum.CATALOG_SERVICE: real_catalog_service,
         ContextEnum.MIGRATION_SERVICE: mock_migration_service,
-        ContextEnum.TASK_RUNNER: mock_task_runner,
+        ContextEnum.MIGRATION_DISPATCHER: mock_migration_dispatcher,
+        ContextEnum.PROGRESS_BUS: mock_progress_bus,
+        ContextEnum.PROGRESS_PUBLISHER: mock_progress_publisher,
     }
 
 

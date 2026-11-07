@@ -9,7 +9,7 @@ from strawberry.fastapi import GraphQLRouter
 from strawberry.subscriptions import GRAPHQL_TRANSPORT_WS_PROTOCOL, GRAPHQL_WS_PROTOCOL
 from src.config import init_settings
 from src.schema.strawberry_schema import schema
-from src.context import get_cache_service, get_context, init_task_runner
+from src.context import get_cache_service, get_context, init_task_infrastructure
 from src.db.setup_mongo import setup_mongo
 from src.logger import get_logger, setup_logger
 from src.features.playback import video_router
@@ -40,9 +40,11 @@ def create_app():
             ThreadPoolExecutor(max_workers=settings.io_thread_pool_size, thread_name_prefix="storage-io")
         )
         await setup_mongo(settings.mongo)
-        task_runner = await init_task_runner()
+        # Tasks run in the worker processes (src/worker.py); this process only queues
+        # them and relays their progress, so restarting it never interrupts one.
+        task_infrastructure = await init_task_infrastructure()
         yield
-        await task_runner.shutdown()
+        await task_infrastructure.shutdown()
         await get_cache_service(settings).close()
         logger.info("Application shutdown")
 

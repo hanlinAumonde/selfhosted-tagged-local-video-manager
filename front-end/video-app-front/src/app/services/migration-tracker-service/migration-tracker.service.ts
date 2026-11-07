@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, Subject, takeWhile } from 'rxjs';
+import { Observable, Subject, Subscription, takeWhile } from 'rxjs';
 import { GqlService } from '../GQL-service/GQL.service';
 import { VideoUpdateEventService } from '../video-update-event-service/video-update-event.service';
 import { MigrationStatusEnum, MigrationTaskQueryInput } from '../../core/graphql/generated/graphql';
@@ -22,6 +22,7 @@ export class MigrationTrackerService {
   private videoUpdateEventService = inject(VideoUpdateEventService);
 
   private watched = new Map<string, MigrationTaskItem>();
+  private subscriptions = new Map<string, Subscription>();
 
   private progress = signal<ReadonlyMap<string, MigrationProgressDetail>>(new Map());
   private settled$ = new Subject<string>();
@@ -76,15 +77,27 @@ export class MigrationTrackerService {
     this.watch(task, this.gqlService.migrationRetrySubscription({ taskId: task.id }));
   }
 
-  /** Stop treating a task as watched, e.g. after cancelling it from the UI. */
+  /**
+   * Stop watching a task whose outcome is already known, e.g. one just cancelled from
+   * the UI. Its last live frame is dropped too: views prefer live frames over the task
+   * list, so a stale one would keep showing the task as queued.
+   */
   forget(taskId: string): void {
+    this.subscriptions.get(taskId)?.unsubscribe();
+    this.subscriptions.delete(taskId);
     this.watched.delete(taskId);
+    this.progress.update(current => {
+      if (!current.has(taskId)) return current;
+      const next = new Map(current);
+      next.delete(taskId);
+      return next;
+    });
   }
 
   private watch(task: MigrationTaskItem, frames: Observable<ResultState<MigrationProgressDetail | null>>): void {
     this.watched.set(task.id, task);
 
-    frames
+    const subscription = frames
       .pipe(takeWhile(result => {
         const status = result.data?.status;
         return status !== undefined && !isMigrationTerminal(status);
@@ -99,12 +112,19 @@ export class MigrationTrackerService {
             this.settle(task, frame.status);
           }
         },
-        error: () => this.watched.delete(task.id),
+        error: () => {
+          this.watched.delete(task.id);
+          this.subscriptions.delete(task.id);
+        },
       });
+    if (!subscription.closed) {
+      this.subscriptions.set(task.id, subscription);
+    }
   }
 
   private settle(task: MigrationTaskItem, status: MigrationStatusEnum): void {
     this.watched.delete(task.id);
+    this.subscriptions.delete(task.id);
     this.settled$.next(task.id);
 
     // Cancelled and Failed leave the file where it was; only a completed run moved it.

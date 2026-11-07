@@ -74,10 +74,32 @@ validation:
   page_number_max: 10000
   series_name_max_length: 100
 
-# Background task runner
+# Background tasks (run by the worker processes, see src/worker.py)
 tasks:
-  max_concurrent: 2
-  progress_flush_interval: 3.0
+  # Carries the task queues and progress frames between the web process and workers.
+  redis_url: $REDIS_URL|redis://localhost:6379/0
+  # Migrations copying at once, across all devices.
+  max_concurrent: 4
+  # Copies at once on one device, by storage type.
+  slots_per_device:
+    local_fs: 1
+    s3: 2
+  # Mounts that live on the same physical disk must share a device name, or they are
+  # throttled as separate disks. Key: "<category>/<pseudo_name>".
+  devices: {}
+  #   Local-resource/Resource-1: ssd-1
+  #   Local-resource/Resource-2: ssd-2
+  #   Local-resource/Resource-3: hdd-1
+  # Copies at once on a named device, overriding slots_per_device: the storage type
+  # cannot tell a solid-state disk from a spinning one. Key: a name from devices, or an
+  # inferred one ("local:<category>/<pseudo_name>", "s3:<endpoint_url>/<bucket>").
+  device_limits: {}
+  #   ssd-1: 4
+  #   ssd-2: 4
+  # Also bounds how long a cancel takes to reach a running task.
+  progress_flush_interval: 1.0
+  observe_watchdog_interval: 10.0
+  reconcile_interval: 300.0
 
 # Logging config
 logging:

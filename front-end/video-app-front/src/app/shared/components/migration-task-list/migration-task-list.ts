@@ -56,6 +56,9 @@ export class MigrationTaskList implements OnInit {
   });
 
   activeFilterIndex = signal<number>(0);
+
+  /* Running tasks whose cancel was accepted but has not reached the worker yet. */
+  cancelling = signal<ReadonlySet<string>>(new Set());
   activeProgress = this.migrationTracker.liveProgress;
 
   constructor() {
@@ -65,7 +68,10 @@ export class MigrationTaskList implements OnInit {
     */
     this.migrationTracker.onTaskSettled()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.loadTasks());
+      .subscribe((taskId) => {
+        this.setCancelling(taskId, false);
+        this.loadTasks();
+      });
   }
 
   ngOnInit() {
@@ -112,13 +118,35 @@ export class MigrationTaskList implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          if (result.data?.success) {
+          if (!result.data?.success) return;
+
+          /*
+            A queued task is settled by the request itself. A running one has only been
+            asked to stop: keep watching it, and let its final frame say how it ended.
+          */
+          if (result.data.task?.status === MigrationStatusEnum.Cancelled) {
             this.migrationTracker.forget(taskId);
             this.toastService.emitNewToast('Migration task cancelled.', ToastType.Success);
             this.loadTasks();
+          } else {
+            this.setCancelling(taskId, true);
+            this.toastService.emitNewToast('Cancelling migration task…', ToastType.Success);
           }
         }
       });
+  }
+
+  isCancelling(taskId: string): boolean {
+    return this.cancelling().has(taskId);
+  }
+
+  private setCancelling(taskId: string, on: boolean) {
+    this.cancelling.update(current => {
+      if (current.has(taskId) === on) return current;
+      const next = new Set(current);
+      if (on) next.add(taskId); else next.delete(taskId);
+      return next;
+    });
   }
 
   retryTask(task: MigrationTaskItem) {

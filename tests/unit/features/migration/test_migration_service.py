@@ -256,14 +256,6 @@ class TestCancelTask:
         refreshed = await MigrationTaskModel.get(task.id)
         assert refreshed.status == TaskStatus.CANCELLED
 
-    async def test_cancel_processing_sets_flag(
-        self, two_cat_migration_svc, init_db, task_factory,
-    ):
-        task = await task_factory(status=TaskStatus.PROCESSING)
-
-        result = await two_cat_migration_svc.cancel_task(str(task.id))
-        assert two_cat_migration_svc._cancel_requested.get(str(task.id)) is True
-
     async def test_cancel_nonexistent_raises(self, two_cat_migration_svc, init_db):
         from bson import ObjectId
         with pytest.raises(InputValidationError, match="does not exist"):
@@ -340,16 +332,15 @@ class TestRunTask:
         """A task cancelled before a worker picks it up must not start the copy."""
         svc = two_cat_migration_svc
         task = await task_factory(status=TaskStatus.PENDING)
-        svc.request_cancel(str(task.id))
+        await svc.cancel_task(str(task.id))
 
         events = await _collect(svc.run_task(str(task.id)))
 
-        assert len(events) == 1
-        assert events[0].status == TaskStatus.CANCELLED
+        assert events == []
         refreshed = await MigrationTaskModel.get(task.id)
         assert refreshed.status == TaskStatus.CANCELLED
 
-    async def test_start_from_skips_earlier_phases(
+    async def test_resume_point_skips_earlier_phases(
         self, two_cat_migration_svc, init_db, two_cat_handler_service,
         video_factory, local_resource_dir, target_dir, task_factory,
     ):
@@ -373,11 +364,11 @@ class TestRunTask:
             source_path=source_db,
             target_path=target_db,
             target_category="Target-category",
-            status=TaskStatus.DB_UPDATED,
+            resume_from=TaskStatus.DELETING_SOURCE,
             file_size=100,
         )
 
-        await _collect(svc.run_task(str(task.id), start_from=TaskStatus.DELETING_SOURCE))
+        await _collect(svc.run_task(str(task.id)))
 
         refreshed = await MigrationTaskModel.get(task.id)
         assert refreshed.status == TaskStatus.COMPLETED
@@ -483,7 +474,7 @@ class TestPrepareRetry:
         assert reset.error_message is None
         assert reset.failed_step is None
 
-        events = await _collect(svc.run_task(str(task.id), start_from=start_from))
+        events = await _collect(svc.run_task(str(task.id)))
         assert len(events) >= 1
 
         refreshed = await MigrationTaskModel.get(task.id)
@@ -526,7 +517,6 @@ class TestPlanRecovery:
     @pytest.mark.parametrize(
         "interrupted_at,expected_resume",
         [
-            (TaskStatus.PENDING, TaskStatus.PROCESSING),
             (TaskStatus.PROCESSING, TaskStatus.PROCESSING),
             (TaskStatus.PROCESS_DONE, TaskStatus.UPDATING_DB),
             (TaskStatus.UPDATING_DB, TaskStatus.UPDATING_DB),
@@ -541,11 +531,13 @@ class TestPlanRecovery:
         task = await task_factory(status=interrupted_at)
         plan = await two_cat_migration_svc.plan_recovery()
 
-        assert (str(task.id), expected_resume) in plan
+        assert str(task.id) in plan
 
-        # Every recovered task is handed back to the queue as PENDING.
+        # Every recovered task is handed back to the queue as PENDING, with the phase to
+        # resume at stored for the worker's claim.
         refreshed = await MigrationTaskModel.get(task.id)
         assert refreshed.status == TaskStatus.PENDING
+        assert refreshed.resume_from == expected_resume
 
     @pytest.mark.parametrize(
         "status", [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
@@ -556,7 +548,7 @@ class TestPlanRecovery:
         task = await task_factory(status=status)
         plan = await two_cat_migration_svc.plan_recovery()
 
-        assert all(task_id != str(task.id) for task_id, _ in plan)
+        assert str(task.id) not in plan
         refreshed = await MigrationTaskModel.get(task.id)
         assert refreshed.status == status
 
