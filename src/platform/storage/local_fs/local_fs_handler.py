@@ -1,8 +1,10 @@
 import asyncio
 import os
 import shutil
+from contextlib import suppress
 from stat import S_ISDIR
 from typing import AsyncIterator
+from uuid import uuid4
 
 import aiofiles
 
@@ -18,6 +20,8 @@ class LocalFSResourceHandler(BaseResourceHandler):
     """Resource handler for local filesystem operations."""
 
     storage_type = "local_fs"
+
+    moves_without_copying = True
 
     @classmethod
     def from_config(cls, spec: HandlerBuildSpec) -> "LocalFSResourceHandler":
@@ -142,6 +146,50 @@ class LocalFSResourceHandler(BaseResourceHandler):
                 await f.write(chunk)
                 total_written += len(chunk)
         return total_written
+
+    def _link(self, source: str, target: str) -> bool:
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            os.link(source, target)
+        except FileExistsError:
+            # A caller told "no" would copy onto the target, and writing through a link
+            # left by an earlier attempt empties the source itself.
+            return os.path.samefile(source, target)
+        except OSError as e:
+            # Only the OS knows: two bind mounts can report one st_dev and still refuse.
+            logger.info(f"Cannot link {source} to {target}: {e}")
+            return False
+        return True
+
+    async def link_file(self, source: str, target: str) -> bool:
+        return await asyncio.to_thread(self._link, source, target)
+
+    def _can_rename(self, source: str, target: str) -> bool:
+        name = f".rename-probe-{uuid4().hex}.part"
+        probe = os.path.join(os.path.dirname(source), name)
+        landed = os.path.join(os.path.dirname(target), name)
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            open(probe, "xb").close()
+        except OSError as e:
+            logger.info(f"Cannot probe a rename from {source} to {target}: {e}")
+            return False
+        try:
+            os.rename(probe, landed)
+        except OSError as e:
+            logger.info(f"Cannot rename from {source} to {target}: {e}")
+            with suppress(OSError):
+                os.remove(probe)
+            return False
+        with suppress(OSError):
+            os.remove(landed)
+        return True
+
+    async def can_rename(self, source: str, target: str) -> bool:
+        return await asyncio.to_thread(self._can_rename, source, target)
+
+    async def replace_file(self, staged: str, target: str) -> None:
+        await asyncio.to_thread(os.replace, staged, target)
 
     async def get_available_space(self, path: str) -> int | None:
         try:

@@ -45,6 +45,9 @@ class S3ResourceHandler(BaseResourceHandler):
 
     storage_type = "s3"
 
+    # A multipart upload changes nothing at its key until it is completed.
+    writes_atomically = True
+
     @classmethod
     def from_config(cls, spec: HandlerBuildSpec) -> "S3ResourceHandler":
         return cls(spec.category, spec.pseudo_paths, spec.config.mounts)

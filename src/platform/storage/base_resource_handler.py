@@ -33,6 +33,12 @@ class BaseResourceHandler(ABC):
     #: key the registry files this class under; the two must not drift apart.
     storage_type: ClassVar[str]
 
+    #: Whether a streaming write that fails or is abandoned leaves the path as it found it.
+    writes_atomically: ClassVar[bool] = False
+
+    #: Whether a file can reach another path on this storage with no bytes rewritten.
+    moves_without_copying: ClassVar[bool] = False
+
     @classmethod
     @abstractmethod
     def from_config(cls, spec: HandlerBuildSpec) -> BaseResourceHandler:
@@ -220,6 +226,51 @@ class BaseResourceHandler(ABC):
         :rtype: int
         """
         ...
+
+    async def link_file(self, source: str, target: str) -> bool:
+        """
+        Give a stored file a second path without copying it, if the storage can.
+
+        :param source: FS-format path of the existing file.
+        :type source: str
+        :param target: FS-format path to add. Must be free.
+        :type target: str
+        :return: True if the file now has both paths. False leaves the storage unchanged,
+            and the caller has to copy instead.
+        :rtype: bool
+        """
+        return False
+
+    async def can_rename(self, source: str, target: str) -> bool:
+        """
+        Whether a file in ``source``'s directory could be renamed into ``target``'s.
+
+        Answered by trying it on an empty file: only the operating system knows, since
+        two bind mounts can look like one filesystem and still refuse.
+
+        :param source: FS-format path of the file that would move.
+        :type source: str
+        :param target: FS-format path it would end up at.
+        :type target: str
+        :return: True if the rename would work. Either way ``source`` is left untouched.
+        :rtype: bool
+        """
+        return False
+
+    async def replace_file(self, staged: str, target: str) -> None:
+        """
+        Atomically move a file onto ``target``, replacing anything already there.
+
+        Only called on storage whose writes are not atomic, since that is the only kind
+        that needs to stage a file first or can rename one.
+
+        :param staged: FS-format path of the file to move.
+        :type staged: str
+        :param target: FS-format path it ends up at.
+        :type target: str
+        :rtype: None
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot replace a staged file")
 
     async def get_available_space(self, path: str) -> int | None:
         """

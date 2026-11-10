@@ -25,6 +25,10 @@ class MigrationTaskModel(BaseTaskModel):
     conflict_strategy: Optional[str] = None
     renamed_target_path: Optional[str] = None
 
+    # The file stays at the source until the database phase renames it. Stored because a
+    # replay of that phase in a new process cannot tell this from the state the world is in.
+    move_by_rename: bool = False
+
     def get_progress(self) -> tuple[int, int]:
         """
         Progress in bytes copied out of the file's total size.

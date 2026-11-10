@@ -64,7 +64,7 @@ class TestCancel:
 
         # When cancel_task is called
         # Then InputValidationError is raised
-        with pytest.raises(InputValidationError, match="does not allow cancellation"):
+        with pytest.raises(InputValidationError, match="does not allow cancellation: UPDATING_DB"):
             await two_cat_migration_svc.cancel_task(str(task.id))
         # And the stored cancel_requested is still False
         assert (await MigrationTaskModel.get(task.id)).cancel_requested is False

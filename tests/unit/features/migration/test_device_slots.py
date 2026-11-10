@@ -10,10 +10,7 @@ from contextlib import AsyncExitStack
 import pytest
 
 from src.config import Settings
-from src.features.catalog.series_service import SeriesService
-from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.migration.device_slots import Device, DeviceSlots, device_of
-from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 
 pytestmark = pytest.mark.unit
@@ -197,21 +194,6 @@ class TestSlots:
 # -----------------------------------------------------------------------
 # The migration service holds its devices' slots for the copy phase
 # -----------------------------------------------------------------------
-
-@pytest.fixture
-def slotted_migration_svc(two_category_settings, two_cat_handler_service, two_cat_cache_service):
-    dir_meta = DirMetadataService(
-        settings=two_category_settings,
-        resource_handler_service=two_cat_handler_service,
-        cache_service=two_cat_cache_service,
-    )
-    return MigrationService(
-        resource_handler_service=two_cat_handler_service,
-        dir_metadata_service=dir_meta,
-        series_service=SeriesService(),
-        copy_slots=DeviceSlots.from_settings(two_category_settings),
-    )
-
 
 async def _drain(gen) -> None:
     async for _ in gen:

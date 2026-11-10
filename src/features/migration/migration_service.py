@@ -6,14 +6,14 @@ import time
 from typing import AsyncGenerator
 
 import pymongo
-from beanie.operators import Set
+from beanie.operators import In, Set
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
-from src.features.migration.device_slots import DeviceSlots
+from src.features.migration.device_slots import Device, DeviceSlots
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.features.catalog.series_service import SeriesService
@@ -69,16 +69,57 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
     def _processing_slot(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
         """
         Hold a copy slot on the source's and the target's device while the file copies.
+        When the source and target are on the same device, it won't request any slots
 
         :param task: The PENDING task about to be claimed.
         :type task: MigrationTaskModel
         :return: The slots to hold, or nothing when this service has no limits.
         :rtype: AbstractAsyncContextManager
         """
+        if self._skips_slots(task):
+            return nullcontext()
+        return self._copy_slots_for(task)
+
+    def _copy_slots_for(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
         if self.copy_slots is None:
             return nullcontext()
+        return self.copy_slots.hold(self._devices_of(task))
+
+    def _devices_of(self, task: MigrationTaskModel) -> list[Device]:
         target_db = task.renamed_target_path or task.target_path
-        return self.copy_slots.hold(self.copy_slots.devices_of(task.source_path, target_db))
+        return self.copy_slots.devices_of(task.source_path, target_db)
+
+    def _may_move_without_copying(self, task: MigrationTaskModel) -> bool:
+        """
+        Whether a link or a rename is worth attempting for this task.
+
+        Limited to one handler because a path means nothing to another storage: linking
+        to an S3 key would create a stray local file named after it.
+
+        :param task: The task about to run.
+        :type task: MigrationTaskModel
+        :return: True if the file might reach its target with no bytes rewritten.
+        :rtype: bool
+        """
+        source_handler, target_handler, _, _ = self._resolve_paths(task)
+        return source_handler is target_handler and source_handler.moves_without_copying
+
+    def _skips_slots(self, task: MigrationTaskModel) -> bool:
+        """
+        Whether this task should start without queueing for slots.
+
+        A link or a rename moves no bytes, yet a slot is taken before the claim, so it
+        would otherwise wait behind whichever long copy holds its device.
+
+        :param task: The task about to run.
+        :type task: MigrationTaskModel
+        :return: True if the source and target are on one device and no copy is expected.
+        :rtype: bool
+        """
+        if self.copy_slots is None or not self._may_move_without_copying(task):
+            return False
+        source_device, target_device = self._devices_of(task)
+        return source_device.name == target_device.name
 
     # ------------------------------------------------------------------
     # Path resolution
@@ -108,6 +149,53 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         return source_handler, target_handler, source_fs, target_fs
 
+    @staticmethod
+    def _replaces_in_place(task: MigrationTaskModel, handler: BaseResourceHandler) -> bool:
+        """An overwrite on storage that needs no staging: a finished write is the replacement."""
+        return task.conflict_strategy == "overwrite" and handler.writes_atomically
+
+    def _write_path(
+        self, task: MigrationTaskModel, handler: BaseResourceHandler, target_fs: str
+    ) -> str:
+        """
+        Where the first phase puts the file.
+
+        An overwrite on storage without atomic writes goes to a staging file, because what
+        sits at the target belongs to another video until the migration can no longer stop.
+        The name leaves out the file's own so it cannot exceed the filesystem's limit, and
+        ``.part`` keeps it out of directory listings.
+
+        :param task: The task being executed.
+        :type task: MigrationTaskModel
+        :param handler: Storage handler for the target category.
+        :type handler: BaseResourceHandler
+        :param target_fs: Final target path in FS format.
+        :type target_fs: str
+        :return: FS-format path to write to.
+        :rtype: str
+        """
+        if task.conflict_strategy != "overwrite" or handler.writes_atomically:
+            return target_fs
+        return handler.join_path(handler.dirname(target_fs), f".migrating-{task.id}.part")
+
+    async def _discard_partial_copy(
+        self, task: MigrationTaskModel, handler: BaseResourceHandler, target_fs: str
+    ) -> None:
+        """
+        Remove what the first phase wrote, and nothing else.
+
+        :param task: The task being rewound or stopped.
+        :type task: MigrationTaskModel
+        :param handler: Storage handler for the target category.
+        :type handler: BaseResourceHandler
+        :param target_fs: Final target path in FS format.
+        :type target_fs: str
+        :rtype: None
+        """
+        if self._replaces_in_place(task, handler):
+            return
+        await self._cleanup_target(handler, self._write_path(task, handler, target_fs))
+
     async def _compensate_before_resume(
         self, task: MigrationTaskModel, start_from: TaskStatus
     ) -> None:
@@ -128,7 +216,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             return
 
         _, target_handler, _, target_fs = self._resolve_paths(task)
-        await self._cleanup_target(target_handler, target_fs)
+        await self._discard_partial_copy(task, target_handler, target_fs)
         task.set_progress(0)
 
     # ------------------------------------------------------------------
@@ -311,8 +399,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         Runs in the web process, which shares no memory with the worker, so both outcomes
         are a single conditional write to the task document:
 
-        * PENDING — settled as CANCELLED on the spot. The worker's claim then misses, so
-          the task never starts, even if its message is already on the queue.
+        * PENDING and due to start with the copy — settled as CANCELLED on the spot. The
+          worker's claim then misses, so the task never starts, even if its message is
+          already on the queue.
+        * PENDING but resuming past the copy — refused like any later phase. Recovery or
+          a retry requeued it with the first phase done, and nothing here could undo that.
         * PROCESSING — ``cancel_requested`` is raised. The worker reads it back on its next
           progress flush and unwinds the copy, cleaning up as it goes.
 
@@ -331,7 +422,9 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         now = time.time()
 
         settled = await model.find_one(
-            model.id == oid, model.status == TaskStatus.PENDING
+            model.id == oid,
+            model.status == TaskStatus.PENDING,
+            In(model.resume_from, [None, TaskStatus.PROCESSING]),
         ).update(Set({
             model.status: TaskStatus.CANCELLED,
             model.updated_at: now,
@@ -345,7 +438,8 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 task = await MigrationTaskModel.get(oid)
                 if task is None:
                     raise InputValidationError(field="task_id", issue="task does not exist")
-                raise InputValidationError(field="task_id", issue=f"current status does not allow cancellation: {task.status}")
+                phase = task.resume_from if task.status == TaskStatus.PENDING else task.status
+                raise InputValidationError(field="task_id", issue=f"current status does not allow cancellation: {phase}")
 
         return await MigrationTaskModel.get(oid)
 
@@ -565,7 +659,79 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         self, task: MigrationTaskModel
     ) -> AsyncGenerator[ProgressFrame, None]:
         """
-        Phase 1 — stream the file from source to target, reporting progress each second.
+        Phase 1 — put the file at the target by hard link or copy, or settle on renaming it.
+
+        The source keeps its name through this phase on every path, which is what makes
+        everything written here safe to discard. A filesystem without hard links renames
+        in phase 2 instead, once a cancel can no longer land.
+
+        On success the task moves to PROCESS_DONE. On cancellation or failure the partial
+        copy is removed, since this phase always restarts from the beginning.
+
+        :param task: The task being executed.
+        :type task: MigrationTaskModel
+        :yield: A frame when the phase starts, one per second while a copy runs, and a
+            final frame on completion or cancellation.
+        :rtype: AsyncGenerator[ProgressFrame, None]
+        :raises Exception: Any copy failure, re-raised after the partial copy is cleaned
+            up, so the state machine can record it as FAILED.
+        """
+        source_handler, target_handler, source_fs, target_fs = self._resolve_paths(task)
+        write_fs = self._write_path(task, target_handler, target_fs)
+
+        await self._update_task_status(task, TaskStatus.PROCESSING)
+        yield self._make_progress(task, message="Starting copy")
+
+        may_skip_copy = self._may_move_without_copying(task)
+        linked = may_skip_copy and await source_handler.link_file(source_fs, write_fs)
+        renames = may_skip_copy and not linked and await source_handler.can_rename(source_fs, target_fs)
+        if not linked and not renames:
+            slots = self._copy_slots_for(task) if self._skips_slots(task) else nullcontext()
+            async with slots:
+                async for frame in self._stream_copy(
+                    task, source_handler, target_handler, source_fs, write_fs, target_fs
+                ):
+                    yield frame
+            if task.status == TaskStatus.CANCELLED:
+                return
+
+        if not await self._finish_processing(
+            task, bytes_transferred=task.file_size, move_by_rename=renames
+        ):
+            if not self._replaces_in_place(task, target_handler):
+                yield await self._settle_cancelled(task, target_handler, target_fs, task.file_size)
+                return
+            # The replaced object went when the upload completed; a cancel can no longer
+            # restore it, and stopping now would leave its record pointing at another file.
+            await self._update_task_status(
+                task, TaskStatus.PROCESS_DONE, bytes_transferred=task.file_size
+            )
+
+        yield self._make_progress(task, current=task.file_size, message="Copy completed")
+
+    async def _settle_cancelled(
+        self,
+        task: MigrationTaskModel,
+        target_handler: BaseResourceHandler,
+        target_fs: str,
+        current: int,
+    ) -> ProgressFrame:
+        await self._discard_partial_copy(task, target_handler, target_fs)
+        await self._update_task_status(task, TaskStatus.CANCELLED)
+        self._cancel_requested.pop(str(task.id), None)
+        return self._make_progress(task, current=current, message="cancelled")
+
+    async def _stream_copy(
+        self,
+        task: MigrationTaskModel,
+        source_handler: BaseResourceHandler,
+        target_handler: BaseResourceHandler,
+        source_fs: str,
+        write_fs: str,
+        target_fs: str,
+    ) -> AsyncGenerator[ProgressFrame, None]:
+        """
+        Stream the file from source to ``write_fs``, reporting progress each second.
 
         ``write_file_streaming`` consumes its whole iterator inside a single await, which
         would keep this generator's frame suspended for the entire copy and make it unable
@@ -573,22 +739,22 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         reported while the transfer is in flight; ``counting_reader`` sits in between,
         tallying bytes and checking for cancellation on every chunk.
 
-        On success the task moves to PROCESS_DONE. On cancellation or failure the partial
-        target file is removed, since this phase always restarts from the beginning.
-
-        :param task: The task being executed.
+        :param task: The task being executed; left CANCELLED if a cancel stopped the copy.
         :type task: MigrationTaskModel
-        :yield: A frame when the copy starts, one per second while it runs, and a final
-            frame on completion or cancellation.
+        :param source_handler: Storage handler for the source category.
+        :type source_handler: BaseResourceHandler
+        :param target_handler: Storage handler for the target category.
+        :type target_handler: BaseResourceHandler
+        :param source_fs: Source path in FS format.
+        :type source_fs: str
+        :param write_fs: FS-format path to write to.
+        :type write_fs: str
+        :param target_fs: Final target path in FS format.
+        :type target_fs: str
+        :yield: One frame per second while the copy runs, and one on cancellation.
         :rtype: AsyncGenerator[ProgressFrame, None]
-        :raises Exception: Any copy failure, re-raised after the target is cleaned up, so
-            the state machine can record it as FAILED.
+        :raises Exception: Any copy failure, after the partial copy is cleaned up.
         """
-        source_handler, target_handler, source_fs, target_fs = self._resolve_paths(task)
-
-        await self._update_task_status(task, TaskStatus.PROCESSING)
-        yield self._make_progress(task, message="Starting copy")
-
         task_id = str(task.id)
         bytes_copied = 0
 
@@ -602,7 +768,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 yield chunk
 
         copy_task = asyncio.create_task(
-            target_handler.write_file_streaming(target_fs, counting_reader())
+            target_handler.write_file_streaming(write_fs, counting_reader())
         )
 
         try:
@@ -619,29 +785,40 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         try:
             await copy_task
         except _MigrationCancelled:
-            await self._cleanup_target(target_handler, target_fs)
-            await self._update_task_status(task, TaskStatus.CANCELLED)
-            self._cancel_requested.pop(task_id, None)
-            yield self._make_progress(task, current=bytes_copied, message="cancelled")
-            return
+            yield await self._settle_cancelled(task, target_handler, target_fs, bytes_copied)
         except Exception:
-            await self._cleanup_target(target_handler, target_fs)
+            await self._discard_partial_copy(task, target_handler, target_fs)
             raise
-
-        if not await self._finish_processing(task, bytes_transferred=task.file_size):
-            # Cancelled after the last chunk was read: the copy is complete, but the user
-            # was told it would stop, so it is undone rather than kept.
-            await self._cleanup_target(target_handler, target_fs)
-            await self._update_task_status(task, TaskStatus.CANCELLED)
-            self._cancel_requested.pop(task_id, None)
-            yield self._make_progress(task, current=bytes_copied, message="cancelled")
-            return
-
-        yield self._make_progress(task, current=task.file_size, message="Copy completed")
 
     # ------------------------------------------------------------------
     # Phase: UPDATING_DB
     # ------------------------------------------------------------------
+
+    async def _put_file_at_target(self, task: MigrationTaskModel) -> None:
+        """
+        Do the move the first phase left for this one: a rename, or publishing a staged copy.
+
+        Belongs here and not at the end of phase 1: a cancel can only land on a PROCESSING
+        task, so from here on the source's old place and the replaced file are no longer
+        needed. A file already gone from where it would move from was moved by an earlier
+        run of this phase.
+
+        :param task: The task being executed.
+        :type task: MigrationTaskModel
+        :rtype: None
+        :raises Exception: If a file due to be renamed is at neither the source nor the target.
+        """
+        source_handler, target_handler, source_fs, target_fs = self._resolve_paths(task)
+        if task.move_by_rename:
+            if await source_handler.stat(source_fs) is not None:
+                await source_handler.replace_file(source_fs, target_fs)
+            elif await target_handler.stat(target_fs) is None:
+                raise Exception(f"File to migrate not found: {source_fs}")
+            return
+
+        staged_fs = self._write_path(task, target_handler, target_fs)
+        if staged_fs != target_fs and await target_handler.stat(staged_fs) is not None:
+            await target_handler.replace_file(staged_fs, target_fs)
 
     async def _execute_db_update(self, task: MigrationTaskModel) -> None:
         """
@@ -661,6 +838,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :raises Exception: If the video record is at neither the source nor the target path.
         """
         await self._update_task_status(task, TaskStatus.UPDATING_DB)
+        await self._put_file_at_target(task)
 
         target_path = task.renamed_target_path or task.target_path
 
@@ -712,11 +890,14 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         await self._update_task_status(task, TaskStatus.DELETING_SOURCE)
 
         warning = None
-        try:
-            await source_handler.delete_file(source_fs)
-        except Exception as e:
-            warning = f"Source file deletion failed: {e}"
-            logger.warning(f"Task {task.id}: {warning}")
+        # Decided by the flag, not by the source's absence: after a rename, a file at the
+        # old path is a new one that someone else put there.
+        if not task.move_by_rename:
+            try:
+                await source_handler.delete_file(source_fs)
+            except Exception as e:
+                warning = f"Source file deletion failed: {e}"
+                logger.warning(f"Task {task.id}: {warning}")
 
         try:
             source_dir_db = source_handler.dirname(task.source_path)
