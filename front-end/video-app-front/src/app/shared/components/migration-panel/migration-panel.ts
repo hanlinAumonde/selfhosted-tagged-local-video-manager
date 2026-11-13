@@ -1,5 +1,6 @@
 import { Component, inject, signal, computed, DestroyRef, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -59,6 +60,7 @@ export class MigrationPanel {
   selectedTargetDir = signal<string | null>(null);
   dirFilter = signal('');
   sortAscending = signal(true);
+  private browseSubscription?: Subscription;
 
   readonly visibleDirItems = computed(() => {
     const keyword = this.dirFilter().trim().toLowerCase();
@@ -83,8 +85,11 @@ export class MigrationPanel {
     this.browsePath.set(path);
     // The keyword was typed against the previous listing; carrying it over would hide the new one.
     this.dirFilter.set('');
+    // A slower listing for a directory the user already left would otherwise land after
+    // the one they navigated to and overwrite it.
+    this.browseSubscription?.unsubscribe();
     const relativePath = path.length > 0 ? path.join('/') : undefined;
-    this.gqlService.browseDirectoryQuery(relativePath, true, false)
+    this.browseSubscription = this.gqlService.browseDirectoryQuery(relativePath, true, false)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
