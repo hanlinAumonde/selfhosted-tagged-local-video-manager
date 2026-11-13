@@ -49,6 +49,7 @@ _series_service: SeriesService | None = None
 _migration_service: MigrationService | None = None
 _task_infrastructure: "TaskInfrastructure | None" = None
 _path_lock_registry: PathLockRegistry | None = None
+_thumbnail_service: ThumbnailService | None = None
 
 def get_cache_service(settings: Settings = Depends(get_settings)) -> CacheService | None:
     global _cache_service
@@ -92,18 +93,21 @@ def get_dir_metadata_service(
         resource_handler_service=resource_handler_service, 
         cache_service=cache_service
     )
-# DirMetadataServiceDep = Annotated[DirMetadataService, Depends(get_dir_metadata_service)]
 
 def get_thumbnail_service(
-    resource_handler_service = Depends(get_resource_handler_service), 
+    resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg = Depends(get_ffmpeg_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
 ) -> ThumbnailService | None:
-    return ThumbnailService(
-        settings=settings,
-        resource_handler_service=resource_handler_service, 
-        ffmpeg_service=ffmpeg
-    )
+    # One per process: its storage breaker has to remember an outage across requests.
+    global _thumbnail_service
+    if _thumbnail_service is None:
+        _thumbnail_service = ThumbnailService(
+            settings=settings,
+            resource_handler_service=resource_handler_service,
+            ffmpeg_service=ffmpeg,
+        )
+    return _thumbnail_service
 ThumbnailServiceDep = Annotated[ThumbnailService, Depends(get_thumbnail_service)]
 
 def get_path_lock_registry(

@@ -10,12 +10,11 @@ logger = get_logger("ffmpeg_service")
 class FFmpegService:
 
     def __init__(self, semaphore_limit: int):
-        self._semaphore = asyncio.Semaphore(
-            max(
-                semaphore_limit,
-                os.cpu_count() // 2
-            )
+        cpu_ceiling = max(
+            1, 
+            (os.cpu_count() or 2) // 2
         )
+        self._semaphore = asyncio.Semaphore(max(1, min(semaphore_limit, cpu_ceiling)))
 
     # --- Thumbnail generation ---
 

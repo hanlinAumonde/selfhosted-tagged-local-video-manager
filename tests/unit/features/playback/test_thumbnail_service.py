@@ -7,7 +7,8 @@ from fastapi import HTTPException
 
 from src.config import Settings
 from src.features.catalog.video import VideoModel
-from src.features.playback.thumbnail_service import ThumbnailService
+from src.features.playback.thumbnail_service import StorageBreaker, ThumbnailService
+from .conftest import run_attached_work
 
 pytestmark = pytest.mark.unit
 
@@ -54,6 +55,7 @@ async def test_generate_on_the_fly_returns_jpeg_response(
 ):
     video = await video_factory(name="v", duration=0.0)
     response = await thumb_svc.get_thumbnail(str(video.id))
+    await run_attached_work(response)
 
     assert response.media_type == "image/jpeg"
     ffmpeg_svc.generate_thumbnail.assert_called_once()
@@ -68,7 +70,7 @@ async def test_skip_duration_when_already_set(
     thumb_svc, init_db, video_factory, ffmpeg_svc,
 ):
     video = await video_factory(name="v", duration=60.0)
-    await thumb_svc.get_thumbnail(str(video.id))
+    await run_attached_work(await thumb_svc.get_thumbnail(str(video.id)))
 
     ffmpeg_svc.get_video_duration.assert_not_called()
 
@@ -105,6 +107,7 @@ async def test_stored_thumbnail_miss_falls_back_to_generation(
     storage.read_file.return_value = None
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
+    await run_attached_work(response)
 
     assert response.media_type == "image/jpeg"
     ffmpeg_svc.generate_thumbnail.assert_called_once()
@@ -129,8 +132,8 @@ async def test_same_named_videos_in_different_dirs_get_distinct_keys(
     storage = thumb_svc_with_storage._storage_handler
     storage.read_file.return_value = None
 
-    await thumb_svc_with_storage.get_thumbnail(str(first.id))
-    await thumb_svc_with_storage.get_thumbnail(str(second.id))
+    await run_attached_work(await thumb_svc_with_storage.get_thumbnail(str(first.id)))
+    await run_attached_work(await thumb_svc_with_storage.get_thumbnail(str(second.id)))
 
     written_keys = [call.args[0] for call in storage.write_file.call_args_list]
     assert len(written_keys) == 2
@@ -149,7 +152,7 @@ async def test_storage_key_is_derived_from_video_id(
     storage = thumb_svc_with_storage._storage_handler
     storage.read_file.return_value = None
 
-    await thumb_svc_with_storage.get_thumbnail(str(video.id))
+    await run_attached_work(await thumb_svc_with_storage.get_thumbnail(str(video.id)))
 
     expected = f"thumbnails/Test-resource/{video.id}.jpg"
     storage.write_file.assert_called_once()
@@ -170,6 +173,7 @@ async def test_legacy_name_based_key_is_discarded_and_regenerated(
     storage.read_file.return_value = b"WRONG-VIDEO-JPEG"
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
+    await run_attached_work(response)
 
     assert response.media_type == "image/jpeg"
     storage.read_file.assert_not_called()
@@ -196,6 +200,7 @@ def test_storage_init_category_not_found(handler_svc, ffmpeg_svc):
         resource_handler_service=handler_svc,
         ffmpeg_service=ffmpeg_svc,
         settings=settings,
+        storage_breaker=StorageBreaker(),
     )
     assert svc._storage_handler is None
 
@@ -229,4 +234,5 @@ async def test_store_thumbnail_exception_does_not_raise(
     storage.write_file = AsyncMock(side_effect=RuntimeError("write failure"))
 
     response = await thumb_svc_with_storage.get_thumbnail(str(video.id))
+    await run_attached_work(response)
     assert response.media_type == "image/jpeg"

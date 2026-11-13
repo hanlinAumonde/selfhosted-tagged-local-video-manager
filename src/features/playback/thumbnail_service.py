@@ -1,6 +1,10 @@
 import io
+import time
+from typing import Callable
+
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from src.config import Settings
 from src.features.catalog.video import VideoModel
 from src.logger import get_logger
@@ -11,16 +15,57 @@ from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 logger = get_logger("thumbnail_service")
 
+
+class StorageBreaker:
+    """
+    Stops talking to the thumbnail storage for a while after it fails.
+
+    An unreachable S3 does not fail fast: each call waits out the connect timeout and
+    the client's retries, and a page of thumbnails would pay that once per image —
+    making on-the-fly generation far slower than when storage is merely empty. After a
+    failure, storage is skipped for ``cooldown`` seconds; then exactly one call is let
+    through to find out whether it is back, so a still-dead storage costs one timeout
+    per cooldown rather than one per waiting request.
+
+    It must outlive a request, which is why the composition root keeps a single
+    ThumbnailService for the whole process rather than one per request.
+    """
+
+    def __init__(self, cooldown: float = 30.0, clock: Callable[[], float] = time.monotonic):
+        self._cooldown = cooldown
+        self._clock = clock
+        self._opened_at: float | None = None
+        self._probing = False
+
+    def allows(self) -> bool:
+        if self._opened_at is None:
+            return True
+        if self._probing or self._clock() - self._opened_at < self._cooldown:
+            return False
+        self._probing = True
+        return True
+
+    def succeeded(self) -> None:
+        self._opened_at = None
+        self._probing = False
+
+    def failed(self) -> None:
+        self._opened_at = self._clock()
+        self._probing = False
+
+
 class ThumbnailService:
     def __init__(
         self,
         resource_handler_service: ResourceHandlerService,
         ffmpeg_service: FFmpegService,
-        settings: Settings
+        settings: Settings,
+        storage_breaker: StorageBreaker | None = None,
     ):
         self.resourceHandlerService = resource_handler_service
         self.ffmpeg = ffmpeg_service
         self.settings = settings
+        self._storage_breaker = storage_breaker or StorageBreaker()
         self._storage_handler = self._init_storage_handler()
 
     def _init_storage_handler(self) -> BaseResourceHandler | None:
@@ -80,9 +125,10 @@ class ThumbnailService:
         )
         if storage_path and video.thumbnail:
             if video.thumbnail == storage_path:
-                thumbnail_bytes = await self._read_stored_thumbnail(video.thumbnail)
-                if thumbnail_bytes:
-                    return self._build_thumbnail_response(thumbnail_bytes)
+                if self._storage_breaker.allows():
+                    thumbnail_bytes = await self._read_stored_thumbnail(video.thumbnail)
+                    if thumbnail_bytes:
+                        return self._build_thumbnail_response(thumbnail_bytes)
             else:
                 # Legacy name-based key: it may be shared with a same-named video
                 # living in another directory, so its content cannot be trusted.
@@ -95,45 +141,68 @@ class ThumbnailService:
         # 3- generate thumbnail with ffmpeg
         thumbnail_bytes = await self.ffmpeg.generate_thumbnail(video_handler, video_fs_path)
 
-        # 4- persist to storage if configured, otherwise just update duration
-        if storage_path:
-            await self._store_thumbnail(storage_path, thumbnail_bytes)
-            video.thumbnail = storage_path
+        # 4- answer now; storing it and probing a missing duration happen after the
+        # response is sent. Neither changes what the client receives, and both can be
+        # slow (an upload, another ffmpeg run), so the image should not wait on them.
+        needs_duration = not video.duration
+        if not storage_path and not needs_duration:
+            return self._build_thumbnail_response(thumbnail_bytes)
+        return self._build_thumbnail_response(
+            thumbnail_bytes,
+            background=BackgroundTask(
+                self._persist_generated,
+                video, video_handler, video_fs_path, storage_path, thumbnail_bytes, needs_duration,
+            ),
+        )
 
-        if video.duration == 0.0 or video.duration is None:
-            video.duration = await self.ffmpeg.get_video_duration(video_handler, video_fs_path)
-        await video.save()
-
-        return self._build_thumbnail_response(thumbnail_bytes)
+    async def _persist_generated(
+        self,
+        video: VideoModel,
+        video_handler: BaseResourceHandler,
+        video_fs_path: str,
+        storage_path: str | None,
+        thumbnail_bytes: bytes,
+        needs_duration: bool,
+    ) -> None:
+        fields: dict[str, object] = {}
+        if storage_path and await self._store_thumbnail(storage_path, thumbnail_bytes):
+            # Only a key that was actually written may be recorded: a key pointing at
+            # nothing makes every later request pay a storage miss before generating.
+            fields["thumbnail"] = storage_path
+        if needs_duration:
+            fields["duration"] = await self.ffmpeg.get_video_duration(video_handler, video_fs_path)
+        if fields:
+            # $set just these fields: the document may have been edited since it was read.
+            await video.set(fields)
 
     async def _read_stored_thumbnail(self, thumbnail_path: str) -> bytes | None:
         """
-        Try to read a previously stored thumbnail from the storage handler.
-
-        :param thumbnail_path: The storage path of the thumbnail to read.
-        :type thumbnail_path: str
-        :return: The thumbnail bytes if found and readable, or None if not found or on error.
-        :rtype: bytes | None
+        :return: The stored bytes, or None when nothing is stored there or storage failed.
         """
         try:
-            return await self._storage_handler.read_file(thumbnail_path)
+            data = await self._storage_handler.read_file(thumbnail_path)
         except Exception as e:
             logger.warning(f"Failed to read stored thumbnail at {thumbnail_path}: {e}")
+            self._storage_breaker.failed()
             return None
+        # A missing object is a reachable storage answering: it says nothing about an outage.
+        self._storage_breaker.succeeded()
+        return data
 
-    async def _store_thumbnail(self, path: str, data: bytes) -> None:
+    async def _store_thumbnail(self, path: str, data: bytes) -> bool:
         """
-        Store thumbnail bytes via the storage handler.
-
-        :param path: The storage path where the thumbnail should be stored.
-        :type path: str
-        :param data: The thumbnail bytes to store.
-        :type data: bytes
+        :return: Whether the thumbnail is now in storage.
         """
+        if not self._storage_breaker.allows():
+            return False
         try:
             await self._storage_handler.write_file(path, data)
         except Exception as e:
-            logger.exception(f"Failed to store thumbnail at {path}: {e}")
+            logger.warning(f"Failed to store thumbnail at {path}: {e}")
+            self._storage_breaker.failed()
+            return False
+        self._storage_breaker.succeeded()
+        return True
 
     def _compute_thumbnail_storage_path(self, video_id: str) -> str:
         """
@@ -157,7 +226,9 @@ class ThumbnailService:
         )
 
     @staticmethod
-    def _build_thumbnail_response(thumbnail_bytes: bytes) -> StreamingResponse:
+    def _build_thumbnail_response(
+        thumbnail_bytes: bytes, background: BackgroundTask | None = None,
+    ) -> StreamingResponse:
         """
         Build a StreamingResponse for the thumbnail image bytes with appropriate headers.
 
@@ -169,5 +240,6 @@ class ThumbnailService:
         return StreamingResponse(
             content=io.BytesIO(thumbnail_bytes),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=3600"}
+            headers={"Cache-Control": "public, max-age=3600"},
+            background=background,
         )
