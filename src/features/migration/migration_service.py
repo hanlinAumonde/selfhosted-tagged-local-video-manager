@@ -767,9 +767,22 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 bytes_copied += len(chunk)
                 yield chunk
 
-        copy_task = asyncio.create_task(
-            target_handler.write_file_streaming(write_fs, counting_reader())
-        )
+        def report_copied(copied: int) -> None:
+            """Does for a server-side copy what ``counting_reader`` does for a streamed one."""
+            nonlocal bytes_copied
+            if self._cancel_requested.get(task_id):
+                raise _MigrationCancelled()
+            bytes_copied = copied
+
+        async def copy() -> None:
+            # Only within one handler: a path means nothing to another storage.
+            if source_handler is target_handler and await source_handler.copy_server_side(
+                source_fs, write_fs, report_copied
+            ):
+                return
+            await target_handler.write_file_streaming(write_fs, counting_reader())
+
+        copy_task = asyncio.create_task(copy())
 
         try:
             while not copy_task.done():

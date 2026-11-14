@@ -1,6 +1,6 @@
 import asyncio
 import posixpath
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -47,6 +47,10 @@ class S3ResourceHandler(BaseResourceHandler):
 
     # A multipart upload changes nothing at its key until it is completed.
     writes_atomically = True
+
+    #: Bytes per part of a server-side copy. Each part is one request, so this bounds how
+    #: long a request runs and how long a cancel waits; S3 allows no less than 5 MB.
+    COPY_PART_SIZE = 16 * 1024 * 1024
 
     @classmethod
     def from_config(cls, spec: HandlerBuildSpec) -> "S3ResourceHandler":
@@ -381,6 +385,71 @@ class S3ResourceHandler(BaseResourceHandler):
                 UploadId=upload_id,
             )
             raise
+
+    def _share_a_bucket(self, source: str, target: str) -> bool:
+        source_mount, _ = self._get_pseudo_name_from_key(source)
+        target_mount, _ = self._get_pseudo_name_from_key(target)
+        source_config, target_config = self._configs[source_mount], self._configs[target_mount]
+        return (
+            source_config.endpoint_url == target_config.endpoint_url
+            and source_config.bucket == target_config.bucket
+        )
+
+    async def copy_server_side(
+        self, source: str, target: str, on_progress: Callable[[int], None]
+    ) -> bool:
+        """
+        Copy an object to another key of the same bucket with UploadPartCopy.
+
+        In parts rather than one CopyObject: that call is capped at 5 GB, and has to
+        answer within the client's read timeout however large the object is.
+        """
+        if not self._share_a_bucket(source, target):
+            return False
+
+        info = await self.stat(source)
+        if info is None:
+            raise FileNotFoundError(source)
+        size = int(info.size)
+        if size == 0:
+            # A part is asked for by byte range, and an empty object has none.
+            return False
+
+        client, bucket = self._target(target)
+        mpu = await asyncio.to_thread(client.create_multipart_upload, Bucket=bucket, Key=target)
+        upload_id = mpu["UploadId"]
+
+        try:
+            parts: list[dict] = []
+            for part_number, start in enumerate(range(0, size, self.COPY_PART_SIZE), start=1):
+                end = min(start + self.COPY_PART_SIZE, size)
+                response = await asyncio.to_thread(
+                    client.upload_part_copy,
+                    Bucket=bucket,
+                    Key=target,
+                    UploadId=upload_id,
+                    PartNumber=part_number,
+                    CopySource={"Bucket": bucket, "Key": source},
+                    CopySourceRange=f"bytes={start}-{end - 1}",
+                )
+                parts.append(
+                    {"PartNumber": part_number, "ETag": response["CopyPartResult"]["ETag"]}
+                )
+                on_progress(end)
+
+            await asyncio.to_thread(
+                client.complete_multipart_upload,
+                Bucket=bucket,
+                Key=target,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except BaseException:
+            await asyncio.to_thread(
+                client.abort_multipart_upload, Bucket=bucket, Key=target, UploadId=upload_id
+            )
+            raise
+        return True
 
     # ------------------------------------------------------------------
     # Path conversion

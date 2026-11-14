@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, ClassVar
+from typing import TYPE_CHECKING, AsyncIterator, Callable, ClassVar
 
 from src.platform.storage.file_info import FileInfo
 
@@ -238,6 +238,29 @@ class BaseResourceHandler(ABC):
         :return: True if the file now has both paths. False leaves the storage unchanged,
             and the caller has to copy instead.
         :rtype: bool
+        """
+        return False
+
+    async def copy_server_side(
+        self, source: str, target: str, on_progress: Callable[[int], None]
+    ) -> bool:
+        """
+        Have the storage copy a file to another of its paths itself, if it can.
+
+        Unlike a link this takes as long as the file is big, so it reports progress and
+        can be stopped: an exception raised by ``on_progress`` abandons the copy, leaves
+        nothing at ``target``, and propagates.
+
+        :param source: FS-format path of the existing file.
+        :type source: str
+        :param target: FS-format path to copy it to.
+        :type target: str
+        :param on_progress: Called with the bytes copied so far as the copy advances.
+        :type on_progress: Callable[[int], None]
+        :return: True if the copy is complete. False leaves the storage unchanged, and
+            the caller has to stream the file instead.
+        :rtype: bool
+        :raises FileNotFoundError: If there is no file at ``source``.
         """
         return False
 
