@@ -191,7 +191,7 @@ class TestLocalStorageKeepsTheReplacedFile:
         assert _entries(target_dir) == ["movie_a.mp4"]
 
     # Scenario: replaying the database phase after publishing changes nothing
-    #   Given a task stored as FAILED at step UPDATING_DB with strategy "overwrite"
+    #   Given a task stored as FAILED at step COMMITTING with strategy "overwrite"
     #   And the staged file was already published to the target path
     #   When the task is retried and run
     #   Then the stored status is COMPLETED
@@ -201,7 +201,7 @@ class TestLocalStorageKeepsTheReplacedFile:
     ):
         await overwrite_task.set({
             MigrationTaskModel.status: TaskStatus.FAILED,
-            MigrationTaskModel.failed_step: TaskStatus.UPDATING_DB.value,
+            MigrationTaskModel.failed_step: TaskStatus.COMMITTING.value,
         })
         (target_dir / "movie_a.mp4").write_bytes(INCOMING)
 

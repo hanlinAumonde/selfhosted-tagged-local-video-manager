@@ -344,7 +344,7 @@ class TestRunTask:
         self, two_cat_migration_svc, init_db, two_cat_handler_service,
         video_factory, local_resource_dir, target_dir, task_factory,
     ):
-        """Resuming from DELETING_SOURCE must not re-copy nor re-touch the DB record."""
+        """Resuming from CLEANING_UP must not re-copy nor re-touch the DB record."""
         svc = two_cat_migration_svc
         hs = two_cat_handler_service
 
@@ -356,7 +356,7 @@ class TestRunTask:
         target_fs = str(target_dir / "movie_a.mp4").replace("\\", "/")
         target_db = target_handler.convert_to_DB_format_path(target_fs)
 
-        # Simulate a crash right after DB_UPDATED: target file present, record moved.
+        # Simulate a crash right after COMMITTED: target file present, record moved.
         (target_dir / "movie_a.mp4").write_bytes(b"a" * 100)
         await video_factory(name="movie_a", path=target_db, category="Target-category")
 
@@ -364,7 +364,7 @@ class TestRunTask:
             source_path=source_db,
             target_path=target_db,
             target_category="Target-category",
-            resume_from=TaskStatus.DELETING_SOURCE,
+            resume_from=TaskStatus.CLEANING_UP,
             file_size=100,
         )
 
@@ -486,9 +486,9 @@ class TestPrepareRetry:
         """failed_step must survive the DB round-trip and map onto a resumable phase."""
         task = await task_factory(
             status=TaskStatus.FAILED,
-            failed_step=TaskStatus.DB_UPDATED.value,
+            failed_step=TaskStatus.COMMITTED.value,
         )
-        assert await two_cat_migration_svc.prepare_retry(str(task.id)) == TaskStatus.DELETING_SOURCE
+        assert await two_cat_migration_svc.prepare_retry(str(task.id)) == TaskStatus.CLEANING_UP
 
     async def test_retry_tolerates_unparsable_failed_step(
         self, two_cat_migration_svc, init_db, task_factory,
@@ -518,10 +518,10 @@ class TestPlanRecovery:
         "interrupted_at,expected_resume",
         [
             (TaskStatus.PROCESSING, TaskStatus.PROCESSING),
-            (TaskStatus.PROCESS_DONE, TaskStatus.UPDATING_DB),
-            (TaskStatus.UPDATING_DB, TaskStatus.UPDATING_DB),
-            (TaskStatus.DB_UPDATED, TaskStatus.DELETING_SOURCE),
-            (TaskStatus.DELETING_SOURCE, TaskStatus.DELETING_SOURCE),
+            (TaskStatus.PROCESS_DONE, TaskStatus.COMMITTING),
+            (TaskStatus.COMMITTING, TaskStatus.COMMITTING),
+            (TaskStatus.COMMITTED, TaskStatus.CLEANING_UP),
+            (TaskStatus.CLEANING_UP, TaskStatus.CLEANING_UP),
         ],
     )
     async def test_resume_point_per_status(

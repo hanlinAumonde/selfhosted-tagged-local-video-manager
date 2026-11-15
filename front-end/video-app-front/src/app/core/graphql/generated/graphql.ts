@@ -95,14 +95,14 @@ export type MigrationProgressStatus = {
 
 export enum MigrationStatusEnum {
   Cancelled = 'CANCELLED',
+  CleaningUp = 'CLEANING_UP',
+  Committed = 'COMMITTED',
+  Committing = 'COMMITTING',
   Completed = 'COMPLETED',
-  DbUpdated = 'DB_UPDATED',
-  DeletingSource = 'DELETING_SOURCE',
   Failed = 'FAILED',
   Pending = 'PENDING',
   Processing = 'PROCESSING',
-  ProcessDone = 'PROCESS_DONE',
-  UpdatingDb = 'UPDATING_DB'
+  ProcessDone = 'PROCESS_DONE'
 }
 
 export type MigrationTask = {

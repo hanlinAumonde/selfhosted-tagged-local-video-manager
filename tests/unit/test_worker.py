@@ -88,8 +88,8 @@ class TestWorkerStartup:
     async def test_startup_recovers_orphans_and_redelivers_pending_tasks(
         self, worker_factory, task_factory,
     ):
-        # Given a migration task left in DB_UPDATED and a PENDING one
-        orphan = await task_factory(status=TaskStatus.DB_UPDATED)
+        # Given a migration task left in COMMITTED and a PENDING one
+        orphan = await task_factory(status=TaskStatus.COMMITTED)
         pending = await task_factory(
             source_path="Test-category/Test-resource/movie_b.mp4",
             target_path="Target-category/Target-resource/movie_b.mp4",
@@ -102,10 +102,10 @@ class TestWorkerStartup:
 
         # Then both task ids are delivered to the migration queue
         assert sorted(broker.delivered) == sorted([str(orphan.id), str(pending.id)])
-        # And the orphan is stored as PENDING with resume_from DELETING_SOURCE
+        # And the orphan is stored as PENDING with resume_from CLEANING_UP
         stored = await MigrationTaskModel.get(orphan.id)
         assert stored.status == TaskStatus.PENDING
-        assert stored.resume_from == TaskStatus.DELETING_SOURCE
+        assert stored.resume_from == TaskStatus.CLEANING_UP
 
     async def test_worker_builds_device_slots_from_settings(self, worker_factory, worker_settings):
         # Given settings with tasks.max_concurrent 3 and 1 slot per local device
@@ -145,12 +145,12 @@ class TestWebProcess:
     async def test_web_startup_leaves_pending_tasks_to_the_worker(
         self, worker_settings, init_db, task_factory,
     ):
-        # Given a PENDING migration task and one left in DB_UPDATED
+        # Given a PENDING migration task and one left in COMMITTED
         pending = await task_factory()
         orphan = await task_factory(
             source_path="Test-category/Test-resource/movie_b.mp4",
             target_path="Target-category/Target-resource/movie_b.mp4",
-            status=TaskStatus.DB_UPDATED,
+            status=TaskStatus.COMMITTED,
         )
 
         # When the web process's task infrastructure starts
@@ -160,6 +160,6 @@ class TestWebProcess:
 
             # Then both tasks keep their stored status
             assert (await MigrationTaskModel.get(pending.id)).status == TaskStatus.PENDING
-            assert (await MigrationTaskModel.get(orphan.id)).status == TaskStatus.DB_UPDATED
+            assert (await MigrationTaskModel.get(orphan.id)).status == TaskStatus.COMMITTED
         finally:
             await infrastructure.shutdown()

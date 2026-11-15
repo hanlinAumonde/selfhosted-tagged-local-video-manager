@@ -59,12 +59,12 @@ class TestCancel:
     async def test_cancelling_a_task_past_the_copy_is_rejected(
         self, two_cat_migration_svc, init_db, task_factory,
     ):
-        # Given a migration task stored as UPDATING_DB
-        task = await task_factory(status=TaskStatus.UPDATING_DB)
+        # Given a migration task stored as COMMITTING
+        task = await task_factory(status=TaskStatus.COMMITTING)
 
         # When cancel_task is called
         # Then InputValidationError is raised
-        with pytest.raises(InputValidationError, match="does not allow cancellation: UPDATING_DB"):
+        with pytest.raises(InputValidationError, match="does not allow cancellation: COMMITTING"):
             await two_cat_migration_svc.cancel_task(str(task.id))
         # And the stored cancel_requested is still False
         assert (await MigrationTaskModel.get(task.id)).cancel_requested is False
@@ -74,10 +74,10 @@ class TestRetry:
     async def test_retry_stores_the_resume_point_and_clears_the_cancel_flag(
         self, two_cat_migration_svc, init_db, task_factory,
     ):
-        # Given a FAILED migration task with failed_step UPDATING_DB and cancel_requested True
+        # Given a FAILED migration task with failed_step COMMITTING and cancel_requested True
         task = await task_factory(
             status=TaskStatus.FAILED,
-            failed_step=TaskStatus.UPDATING_DB.value,
+            failed_step=TaskStatus.COMMITTING.value,
             error_message="record update failed",
             cancel_requested=True,
         )
@@ -85,10 +85,10 @@ class TestRetry:
         # When prepare_retry is called
         await two_cat_migration_svc.prepare_retry(str(task.id))
 
-        # Then the stored status is PENDING with resume_from UPDATING_DB
+        # Then the stored status is PENDING with resume_from COMMITTING
         stored = await MigrationTaskModel.get(task.id)
         assert stored.status == TaskStatus.PENDING
-        assert stored.resume_from == TaskStatus.UPDATING_DB
+        assert stored.resume_from == TaskStatus.COMMITTING
         # And the stored cancel_requested is False
         assert stored.cancel_requested is False
         assert stored.error_message is None
@@ -97,14 +97,14 @@ class TestRetry:
         self, two_cat_migration_svc, init_db, task_factory, video_factory,
         local_resource_dir, target_dir,
     ):
-        # Given a FAILED migration task with failed_step UPDATING_DB whose target is already copied
+        # Given a FAILED migration task with failed_step COMMITTING whose target is already copied
         await video_factory(name="movie_a", path=SOURCE_DB)
         (target_dir / "movie_a.mp4").write_bytes(b"copied")
         task = await task_factory(
             source_path=SOURCE_DB,
             target_path=TARGET_DB,
             status=TaskStatus.FAILED,
-            failed_step=TaskStatus.UPDATING_DB.value,
+            failed_step=TaskStatus.COMMITTING.value,
         )
 
         # When prepare_retry is called and the task is then run

@@ -804,7 +804,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             raise
 
     # ------------------------------------------------------------------
-    # Phase: UPDATING_DB
+    # Phase: COMMITTING
     # ------------------------------------------------------------------
 
     async def _put_file_at_target(self, task: MigrationTaskModel) -> None:
@@ -833,7 +833,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         if staged_fs != target_fs and await target_handler.stat(staged_fs) is not None:
             await target_handler.replace_file(staged_fs, target_fs)
 
-    async def _execute_db_update(self, task: MigrationTaskModel) -> None:
+    async def _execute_commit(self, task: MigrationTaskModel) -> None:
         """
         Phase 2 — repoint the video record at its new path and category.
 
@@ -850,7 +850,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :rtype: None
         :raises Exception: If the video record is at neither the source nor the target path.
         """
-        await self._update_task_status(task, TaskStatus.UPDATING_DB)
+        await self._update_task_status(task, TaskStatus.COMMITTING)
         await self._put_file_at_target(task)
 
         target_path = task.renamed_target_path or task.target_path
@@ -864,7 +864,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             if migrated is None:
                 raise Exception(f"Source video record not found: {task.source_path}")
             logger.info(f"Task {task.id}: video record already at target, skipping DB update")
-            await self._update_task_status(task, TaskStatus.DB_UPDATED)
+            await self._update_task_status(task, TaskStatus.COMMITTED)
             return
 
         if task.conflict_strategy == "overwrite":
@@ -877,13 +877,13 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         video.category = task.target_category
         await video.save()
 
-        await self._update_task_status(task, TaskStatus.DB_UPDATED)
+        await self._update_task_status(task, TaskStatus.COMMITTED)
 
     # ------------------------------------------------------------------
-    # Phase: DELETING_SOURCE
+    # Phase: CLEANING_UP
     # ------------------------------------------------------------------
 
-    async def _execute_fs_cleanup(self, task: MigrationTaskModel) -> str | None:
+    async def _execute_cleanup(self, task: MigrationTaskModel) -> str | None:
         """
         Phase 3 — delete the original and refresh both directories' metadata.
 
@@ -900,7 +900,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         """
         source_handler, target_handler, source_fs, _ = self._resolve_paths(task)
 
-        await self._update_task_status(task, TaskStatus.DELETING_SOURCE)
+        await self._update_task_status(task, TaskStatus.CLEANING_UP)
 
         warning = None
         # Decided by the flag, not by the source's absence: after a rename, a file at the

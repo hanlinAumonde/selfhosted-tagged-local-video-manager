@@ -39,9 +39,9 @@ class TestClaim:
         assert (await ReindexTaskModel.get(task.id)).status == TaskStatus.COMPLETED
 
     async def test_claim_resumes_from_the_phase_stored_on_the_document(self, reindex_task_factory):
-        # Given a PENDING reindex task whose resume_from is UPDATING_DB
+        # Given a PENDING reindex task whose resume_from is COMMITTING
         machine = ReindexStateMachine()
-        task = await reindex_task_factory(resume_from=TaskStatus.UPDATING_DB)
+        task = await reindex_task_factory(resume_from=TaskStatus.COMMITTING)
 
         # When run_task is called with its id
         await drain(machine, str(task.id))
@@ -137,30 +137,30 @@ class TestRecoveryPlan:
     async def test_orphan_is_reset_to_pending_with_its_resume_point_stored(
         self, reindex_task_factory
     ):
-        # Given a reindex task left in DB_UPDATED by a dead process
-        task = await reindex_task_factory(status=TaskStatus.DB_UPDATED)
+        # Given a reindex task left in COMMITTED by a dead process
+        task = await reindex_task_factory(status=TaskStatus.COMMITTED)
 
         # When plan_recovery runs
         planned = await ReindexStateMachine().plan_recovery()
 
         # Then the returned ids include that task
         assert planned == [str(task.id)]
-        # And the stored status is PENDING with resume_from DELETING_SOURCE
+        # And the stored status is PENDING with resume_from CLEANING_UP
         stored = await ReindexTaskModel.get(task.id)
         assert stored.status == TaskStatus.PENDING
-        assert stored.resume_from == TaskStatus.DELETING_SOURCE
+        assert stored.resume_from == TaskStatus.CLEANING_UP
 
     async def test_pending_task_keeps_the_resume_point_a_retry_wrote(self, reindex_task_factory):
-        # Given a PENDING reindex task whose resume_from is UPDATING_DB
-        task = await reindex_task_factory(resume_from=TaskStatus.UPDATING_DB)
+        # Given a PENDING reindex task whose resume_from is COMMITTING
+        task = await reindex_task_factory(resume_from=TaskStatus.COMMITTING)
 
         # When plan_recovery runs
         planned = await ReindexStateMachine().plan_recovery()
 
         # Then the returned ids include that task
         assert planned == [str(task.id)]
-        # And the stored resume_from is still UPDATING_DB
-        assert (await ReindexTaskModel.get(task.id)).resume_from == TaskStatus.UPDATING_DB
+        # And the stored resume_from is still COMMITTING
+        assert (await ReindexTaskModel.get(task.id)).resume_from == TaskStatus.COMMITTING
 
     async def test_terminal_tasks_are_not_planned(self, reindex_task_factory):
         # Given reindex tasks in COMPLETED, FAILED and CANCELLED
@@ -197,8 +197,8 @@ class TestProcessingSlot:
     async def test_task_resuming_after_processing_takes_no_slot(self, reindex_task_factory):
         # Given a reindex machine with a recording processing slot
         machine = RecordingSlotReindexStateMachine()
-        # And a PENDING reindex task whose resume_from is UPDATING_DB
-        task = await reindex_task_factory(resume_from=TaskStatus.UPDATING_DB)
+        # And a PENDING reindex task whose resume_from is COMMITTING
+        task = await reindex_task_factory(resume_from=TaskStatus.COMMITTING)
 
         # When run_task is driven to the end
         await drain(machine, str(task.id))

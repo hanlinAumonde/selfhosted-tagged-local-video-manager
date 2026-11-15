@@ -227,20 +227,20 @@ class TestMigrationUsesSlots:
         await asyncio.wait_for(run, timeout=5)
         assert (await MigrationTaskModel.get(task.id)).status == TaskStatus.COMPLETED
 
-    async def test_migration_resuming_at_db_update_does_not_wait_for_a_slot(
+    async def test_migration_resuming_at_commit_does_not_wait_for_a_slot(
         self, slotted_migration_svc, two_category_settings, init_db,
         video_factory, task_factory, target_dir,
     ):
         # Given a migration service whose slots allow 1 copy per local device
         svc = slotted_migration_svc
-        # And a PENDING migration task with resume_from UPDATING_DB and its target file already copied
+        # And a PENDING migration task with resume_from COMMITTING and its target file already copied
         source_db = "Test-category/Test-resource/movie_a.mp4"
         target_db = "Target-category/Target-resource/movie_a.mp4"
         await video_factory(name="movie_a", path=source_db)
         (target_dir / "movie_a.mp4").write_bytes(b"a" * 100)
         task = await task_factory(
             source_path=source_db, target_path=target_db, file_size=100,
-            resume_from=TaskStatus.UPDATING_DB,
+            resume_from=TaskStatus.COMMITTING,
         )
 
         # And both devices' slots held by someone else

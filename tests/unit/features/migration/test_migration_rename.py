@@ -183,7 +183,7 @@ class TestRecoveringARename:
         assert not (local_resource_dir / "movie_a.mp4").exists()
 
     # Scenario: a crash after the rename does not rename again
-    #   Given a task stored as UPDATING_DB with move_by_rename set
+    #   Given a task stored as COMMITTING with move_by_rename set
     #   And the file is already at the target and gone from the source
     #   And the video record still points at the source path
     #   When recovery plans the task and the worker runs it
@@ -194,7 +194,7 @@ class TestRecoveringARename:
         self, two_cat_migration_svc, shelving_task, local_resource_dir, shelf,
     ):
         await shelving_task.set({
-            MigrationTaskModel.status: TaskStatus.UPDATING_DB,
+            MigrationTaskModel.status: TaskStatus.COMMITTING,
             MigrationTaskModel.move_by_rename: True,
         })
         (local_resource_dir / "movie_a.mp4").replace(shelf / "movie_a.mp4")
@@ -211,7 +211,7 @@ class TestRecoveringARename:
     #   And the filesystem rejects hard links
     #   And the rename at the database phase fails once, as it does while the file is open
     #   When the migration runs
-    #   Then the stored status is FAILED with failed_step UPDATING_DB
+    #   Then the stored status is FAILED with failed_step COMMITTING
     #   And the source file still holds its content
     #   And the video record still points at the source path
     #   And retrying the task ends COMPLETED with the file at the target
@@ -236,7 +236,7 @@ class TestRecoveringARename:
 
         stored = await MigrationTaskModel.get(shelving_task.id)
         assert stored.status == TaskStatus.FAILED
-        assert stored.failed_step == TaskStatus.UPDATING_DB.value
+        assert stored.failed_step == TaskStatus.COMMITTING.value
         assert (local_resource_dir / "movie_a.mp4").read_bytes() == CONTENT
         assert await VideoModel.find_one(VideoModel.path == SOURCE_DB) is not None
 

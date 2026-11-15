@@ -53,14 +53,14 @@ class ReindexStateMachine(TaskStateMachine[ReindexTaskModel]):
         yield self._make_progress(task, current=task.documents_total, message="indexed")
         await self._finish_processing(task)
 
-    async def _execute_db_update(self, task: ReindexTaskModel) -> None:
+    async def _execute_commit(self, task: ReindexTaskModel) -> None:
         self.phases_run.append("db")
-        await self._update_task_status(task, TaskStatus.UPDATING_DB)
+        await self._update_task_status(task, TaskStatus.COMMITTING)
         if self.fail_in == "db":
             raise RuntimeError("index swap failed")
-        await self._update_task_status(task, TaskStatus.DB_UPDATED)
+        await self._update_task_status(task, TaskStatus.COMMITTED)
 
-    async def _execute_fs_cleanup(self, task: ReindexTaskModel) -> str | None:
+    async def _execute_cleanup(self, task: ReindexTaskModel) -> str | None:
         self.phases_run.append("fs")
         await self._update_task_status(task, TaskStatus.COMPLETED)
         return None
@@ -106,13 +106,13 @@ class RecordingSlotReindexStateMachine(ReindexStateMachine):
         async for frame in super()._execute_processing(task):
             yield frame
 
-    async def _execute_db_update(self, task) -> None:
+    async def _execute_commit(self, task) -> None:
         self.events.append("db")
-        await super()._execute_db_update(task)
+        await super()._execute_commit(task)
 
-    async def _execute_fs_cleanup(self, task) -> str | None:
+    async def _execute_cleanup(self, task) -> str | None:
         self.events.append("fs")
-        return await super()._execute_fs_cleanup(task)
+        return await super()._execute_cleanup(task)
 
 
 class UntilCancelledReindexStateMachine(ReindexStateMachine):

@@ -58,7 +58,7 @@ class TestGenericTaskType:
 
     async def test_resume_point_skips_the_earlier_phases(self, reindex_task_factory):
         machine = ReindexStateMachine()
-        task = await reindex_task_factory(resume_from=TaskStatus.DELETING_SOURCE)
+        task = await reindex_task_factory(resume_from=TaskStatus.CLEANING_UP)
 
         await _drain(machine, str(task.id))
 
@@ -72,7 +72,7 @@ class TestGenericTaskType:
 
         stored = await ReindexTaskModel.get(task.id)
         assert stored.status == TaskStatus.FAILED
-        assert stored.failed_step == TaskStatus.UPDATING_DB.value
+        assert stored.failed_step == TaskStatus.COMMITTING.value
         assert stored.error_message == "index swap failed"
 
     async def test_shutdown_leaves_status_untouched_for_recovery(self, reindex_task_factory):
@@ -120,14 +120,14 @@ class TestModelBinding:
 
 class TestRecoveryCompensation:
     async def test_plan_recovery_maps_status_to_resume_point(self, reindex_task_factory):
-        task = await reindex_task_factory(status=TaskStatus.DB_UPDATED)
+        task = await reindex_task_factory(status=TaskStatus.COMMITTED)
 
         plan = await ReindexStateMachine().plan_recovery()
 
         assert plan == [str(task.id)]
         stored = await ReindexTaskModel.get(task.id)
         assert stored.status == TaskStatus.PENDING
-        assert stored.resume_from == TaskStatus.DELETING_SOURCE
+        assert stored.resume_from == TaskStatus.CLEANING_UP
 
     async def test_compensation_hook_defaults_to_doing_nothing(self, reindex_task_factory):
         """A task type with no side effects to undo needs no recovery code at all."""
@@ -154,23 +154,23 @@ class TestShouldRunPhase:
     def test_processing_from_processing(self):
         assert TaskStateMachine._should_run_phase(TaskStatus.PROCESSING, TaskStatus.PROCESSING) is True
 
-    def test_updating_db_from_processing(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.PROCESSING, TaskStatus.UPDATING_DB) is True
+    def test_committing_from_processing(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.PROCESSING, TaskStatus.COMMITTING) is True
 
-    def test_deleting_source_from_processing(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.PROCESSING, TaskStatus.DELETING_SOURCE) is True
+    def test_cleaning_up_from_processing(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.PROCESSING, TaskStatus.CLEANING_UP) is True
 
-    def test_processing_from_updating_db_is_skipped(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.UPDATING_DB, TaskStatus.PROCESSING) is False
+    def test_processing_from_committing_is_skipped(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.COMMITTING, TaskStatus.PROCESSING) is False
 
-    def test_deleting_source_from_updating_db(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.UPDATING_DB, TaskStatus.DELETING_SOURCE) is True
+    def test_cleaning_up_from_committing(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.COMMITTING, TaskStatus.CLEANING_UP) is True
 
-    def test_processing_from_deleting_source_is_skipped(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.DELETING_SOURCE, TaskStatus.PROCESSING) is False
+    def test_processing_from_cleaning_up_is_skipped(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.CLEANING_UP, TaskStatus.PROCESSING) is False
 
-    def test_updating_db_from_deleting_source_is_skipped(self):
-        assert TaskStateMachine._should_run_phase(TaskStatus.DELETING_SOURCE, TaskStatus.UPDATING_DB) is False
+    def test_committing_from_cleaning_up_is_skipped(self):
+        assert TaskStateMachine._should_run_phase(TaskStatus.CLEANING_UP, TaskStatus.COMMITTING) is False
 
 # =======================================================================
 # The template stays free of migration

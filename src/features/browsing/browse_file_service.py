@@ -269,10 +269,10 @@ class BrowseFileService:
 
         A file that is locked but has no document is a migration writing into this
         directory: the bytes have started arriving, but the catalog record is still at
-        the source and ``_execute_db_update`` is going to move it onto this very path.
+        the source and ``_execute_commit`` is going to move it onto this very path.
         Inserting for it here would claim that path first and make the migration fail on
         the unique index. Such a file is not a video yet, so it gets no document — and,
-        having none, drops out of the listing too. Once UPDATING_DB has run the record
+        having none, drops out of the listing too. Once COMMITTING has run the record
         *is* at this path, the lookup below finds it, and the file lists normally
         (flagged locked, since its task is still active).
 

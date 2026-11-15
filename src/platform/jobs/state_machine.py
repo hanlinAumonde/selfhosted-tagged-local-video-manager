@@ -23,9 +23,11 @@ class TaskStateMachine(ABC, Generic[TTask]):
     The phases are deliberately coarse, because they are the ones that decide how far a
     crashed task has to be rewound:
 
-    1. ``PROCESSING`` — do the actual work, reporting progress as it goes.
-    2. ``UPDATING_DB`` — make the database reflect the result.
-    3. ``DELETING_SOURCE`` — settle the outside world, e.g. remove what the work replaced.
+    1. ``PROCESSING`` — do the actual work, reporting progress as it goes. Cancellable,
+       so nothing here may be irreversible.
+    2. ``COMMITTING`` — make the result take effect: the steps that cannot be undone, and
+       the records that point at them.
+    3. ``CLEANING_UP`` — settle the outside world, e.g. remove what the work replaced.
 
     A task type that has nothing to do in a phase implements it as a no-op; the ordering
     and the crash-recovery matrix still hold. What the template owns is *when* phases run,
@@ -42,7 +44,7 @@ class TaskStateMachine(ABC, Generic[TTask]):
     #: Document class this machine drives. Every subclass must set it.
     task_model: type[TTask]
 
-    _PHASE_ORDER = [TaskStatus.PROCESSING, TaskStatus.UPDATING_DB, TaskStatus.DELETING_SOURCE]
+    _PHASE_ORDER = [TaskStatus.PROCESSING, TaskStatus.COMMITTING, TaskStatus.CLEANING_UP]
     TERMINAL_STATUSES = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
 
     # Where a task interrupted mid-flight should resume from, given the status it died in.
@@ -51,10 +53,10 @@ class TaskStateMachine(ABC, Generic[TTask]):
     _RESUME_POINT_BY_STATUS = {
         TaskStatus.PENDING: TaskStatus.PROCESSING,
         TaskStatus.PROCESSING: TaskStatus.PROCESSING,
-        TaskStatus.PROCESS_DONE: TaskStatus.UPDATING_DB,
-        TaskStatus.UPDATING_DB: TaskStatus.UPDATING_DB,
-        TaskStatus.DB_UPDATED: TaskStatus.DELETING_SOURCE,
-        TaskStatus.DELETING_SOURCE: TaskStatus.DELETING_SOURCE,
+        TaskStatus.PROCESS_DONE: TaskStatus.COMMITTING,
+        TaskStatus.COMMITTING: TaskStatus.COMMITTING,
+        TaskStatus.COMMITTED: TaskStatus.CLEANING_UP,
+        TaskStatus.CLEANING_UP: TaskStatus.CLEANING_UP,
     }
 
     def __init__(self, progress_flush_interval: float = 3.0):
@@ -233,12 +235,12 @@ class TaskStateMachine(ABC, Generic[TTask]):
                 if task.status == TaskStatus.CANCELLED:
                     return
 
-            if self._should_run_phase(start_from, TaskStatus.UPDATING_DB):
-                await self._execute_db_update(task)
+            if self._should_run_phase(start_from, TaskStatus.COMMITTING):
+                await self._execute_commit(task)
                 yield self._make_progress(task, message="Database updated")
 
-            if self._should_run_phase(start_from, TaskStatus.DELETING_SOURCE):
-                warning = await self._execute_fs_cleanup(task)
+            if self._should_run_phase(start_from, TaskStatus.CLEANING_UP):
+                warning = await self._execute_cleanup(task)
                 yield self._make_progress(task, message=warning or "Task completed")
 
         except asyncio.CancelledError:
@@ -267,7 +269,7 @@ class TaskStateMachine(ABC, Generic[TTask]):
         """
         Decide whether a phase is at or after the resume point.
 
-        Statuses that are not phases themselves (PROCESS_DONE, DB_UPDATED, ...) fall back
+        Statuses that are not phases themselves (PROCESS_DONE, COMMITTED, ...) fall back
         to position 0, so an unmapped ``start_from`` conservatively runs everything.
 
         :param start_from: The phase execution should resume at.
@@ -304,11 +306,12 @@ class TaskStateMachine(ABC, Generic[TTask]):
         ...
 
     @abstractmethod
-    async def _execute_db_update(self, task: TTask) -> None:
+    async def _execute_commit(self, task: TTask) -> None:
         """
-        Phase 2 — make the database reflect the completed work.
+        Phase 2 — make the completed work take effect.
 
-        Must be idempotent: recovery may run this phase again after it already succeeded,
+        A cancel can no longer land once this phase starts, so irreversible steps go here
+        rather than in phase 1. Must be idempotent: recovery may run this phase again after it already succeeded,
         so implementations have to detect and tolerate work that is already done.
 
         :param task: The task being executed.
@@ -318,7 +321,7 @@ class TaskStateMachine(ABC, Generic[TTask]):
         ...
 
     @abstractmethod
-    async def _execute_fs_cleanup(self, task: TTask) -> str | None:
+    async def _execute_cleanup(self, task: TTask) -> str | None:
         """
         Phase 3 — settle the outside world and finish the task.
 

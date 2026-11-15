@@ -23,9 +23,9 @@ async def _drain(gen) -> None:
 class TestCancelOfAResumedTask:
     # Scenario: a task resuming at the database phase cannot be cancelled
     #   Given a video record at the source path of "movie_a.mp4"
-    #   And a PENDING migration task with resume_from UPDATING_DB whose target is already copied
+    #   And a PENDING migration task with resume_from COMMITTING whose target is already copied
     #   When cancel_task is called
-    #   Then InputValidationError names UPDATING_DB as the reason
+    #   Then InputValidationError names COMMITTING as the reason
     #   And the stored status is still PENDING
     #   And a later run of that task ends COMPLETED with the video record at the target path
     async def test_a_task_resuming_at_the_database_phase_cannot_be_cancelled(
@@ -34,10 +34,10 @@ class TestCancelOfAResumedTask:
         await video_factory(name="movie_a", path=SOURCE_DB)
         (target_dir / "movie_a.mp4").write_bytes(b"copied")
         task = await task_factory(
-            source_path=SOURCE_DB, target_path=TARGET_DB, resume_from=TaskStatus.UPDATING_DB,
+            source_path=SOURCE_DB, target_path=TARGET_DB, resume_from=TaskStatus.COMMITTING,
         )
 
-        with pytest.raises(InputValidationError, match="does not allow cancellation: UPDATING_DB"):
+        with pytest.raises(InputValidationError, match="does not allow cancellation: COMMITTING"):
             await two_cat_migration_svc.cancel_task(str(task.id))
 
         assert (await MigrationTaskModel.get(task.id)).status == TaskStatus.PENDING
@@ -47,10 +47,10 @@ class TestCancelOfAResumedTask:
 
     # Scenario: a task resuming at source deletion cannot be cancelled
     #   Given a video record already at the target path of "movie_a.mp4"
-    #   And a PENDING migration task with resume_from DELETING_SOURCE
+    #   And a PENDING migration task with resume_from CLEANING_UP
     #   And the file exists at both the source and the target
     #   When cancel_task is called
-    #   Then InputValidationError names DELETING_SOURCE as the reason
+    #   Then InputValidationError names CLEANING_UP as the reason
     #   And a later run of that task ends COMPLETED with the source file gone
     async def test_a_task_resuming_at_source_deletion_cannot_be_cancelled(
         self, two_cat_migration_svc, init_db, task_factory, video_factory,
@@ -60,10 +60,10 @@ class TestCancelOfAResumedTask:
         (target_dir / "movie_a.mp4").write_bytes(b"copied")
         assert (local_resource_dir / "movie_a.mp4").exists()
         task = await task_factory(
-            source_path=SOURCE_DB, target_path=TARGET_DB, resume_from=TaskStatus.DELETING_SOURCE,
+            source_path=SOURCE_DB, target_path=TARGET_DB, resume_from=TaskStatus.CLEANING_UP,
         )
 
-        with pytest.raises(InputValidationError, match="does not allow cancellation: DELETING_SOURCE"):
+        with pytest.raises(InputValidationError, match="does not allow cancellation: CLEANING_UP"):
             await two_cat_migration_svc.cancel_task(str(task.id))
 
         await _drain(two_cat_migration_svc.run_task(str(task.id)))
@@ -90,10 +90,10 @@ class TestCancelOfAResumedTask:
         assert not (target_dir / "movie_a.mp4").exists()
 
     # Scenario: a retry that resumes past the copy cannot be cancelled
-    #   Given a FAILED migration task with failed_step UPDATING_DB
+    #   Given a FAILED migration task with failed_step COMMITTING
     #   And prepare_retry has put it back in the queue
     #   When cancel_task is called
-    #   Then InputValidationError names UPDATING_DB as the reason
+    #   Then InputValidationError names COMMITTING as the reason
     #   And the stored status is still PENDING
     async def test_a_retry_that_resumes_past_the_copy_cannot_be_cancelled(
         self, two_cat_migration_svc, init_db, task_factory,
@@ -102,11 +102,11 @@ class TestCancelOfAResumedTask:
             source_path=SOURCE_DB,
             target_path=TARGET_DB,
             status=TaskStatus.FAILED,
-            failed_step=TaskStatus.UPDATING_DB.value,
+            failed_step=TaskStatus.COMMITTING.value,
         )
         await two_cat_migration_svc.prepare_retry(str(task.id))
 
-        with pytest.raises(InputValidationError, match="does not allow cancellation: UPDATING_DB"):
+        with pytest.raises(InputValidationError, match="does not allow cancellation: COMMITTING"):
             await two_cat_migration_svc.cancel_task(str(task.id))
 
         assert (await MigrationTaskModel.get(task.id)).status == TaskStatus.PENDING

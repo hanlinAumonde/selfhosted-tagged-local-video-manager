@@ -139,8 +139,8 @@ class TestRecover:
     async def test_recover_delivers_orphans_and_every_pending_task(
         self, reindex_task_factory, broker, dispatcher
     ):
-        # Given a reindex task left in DB_UPDATED and a PENDING one dispatched 1 minute ago
-        orphan = await reindex_task_factory(status=TaskStatus.DB_UPDATED)
+        # Given a reindex task left in COMMITTED and a PENDING one dispatched 1 minute ago
+        orphan = await reindex_task_factory(status=TaskStatus.COMMITTED)
         pending = await reindex_task_factory(dispatched_at=time.time() - 60)
         # And a COMPLETED reindex task
         await reindex_task_factory(status=TaskStatus.COMPLETED)
@@ -148,9 +148,9 @@ class TestRecover:
         # When the dispatcher recovers its queue with the reindex machine
         await dispatcher.recover(ReindexStateMachine())
 
-        # Then the DB_UPDATED and PENDING task ids are delivered, and the COMPLETED one is not
+        # Then the COMMITTED and PENDING task ids are delivered, and the COMPLETED one is not
         assert sorted(broker.delivered) == sorted([str(orphan.id), str(pending.id)])
-        # And the orphan is stored as PENDING with resume_from DELETING_SOURCE
+        # And the orphan is stored as PENDING with resume_from CLEANING_UP
         stored = await ReindexTaskModel.get(orphan.id)
         assert stored.status == TaskStatus.PENDING
-        assert stored.resume_from == TaskStatus.DELETING_SOURCE
+        assert stored.resume_from == TaskStatus.CLEANING_UP

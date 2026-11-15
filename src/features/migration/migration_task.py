@@ -61,7 +61,7 @@ class MigrationTaskModel(BaseTaskModel):
                 partialFilterExpression={
                     "status": {"$in": [
                         "PENDING", "PROCESSING", "PROCESS_DONE",
-                        "UPDATING_DB", "DB_UPDATED", "DELETING_SOURCE",
+                        "COMMITTING", "COMMITTED", "CLEANING_UP",
                     ]}
                 },
             ),
@@ -71,7 +71,7 @@ class MigrationTaskModel(BaseTaskModel):
                 partialFilterExpression={
                     "status": {"$in": [
                         "PENDING", "PROCESSING", "PROCESS_DONE",
-                        "UPDATING_DB", "DB_UPDATED", "DELETING_SOURCE",
+                        "COMMITTING", "COMMITTED", "CLEANING_UP",
                     ]}
                 },
             ),
