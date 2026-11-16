@@ -26,6 +26,7 @@ from src.features.browsing.browse_file_service import BrowseFileService
 from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
+from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.dispatch import TaskDispatcher
@@ -168,6 +169,11 @@ def mock_migration_service() -> MagicMock:
 
 
 @pytest.fixture
+def mock_migration_batch_service() -> MagicMock:
+    return MagicMock(spec=MigrationBatchService, name="MigrationBatchService")
+
+
+@pytest.fixture
 def mock_migration_dispatcher() -> MagicMock:
     """Accepts submissions; the queue and the worker behind it are out of scope here."""
     dispatcher = MagicMock(spec=TaskDispatcher, name="TaskDispatcher")
@@ -270,6 +276,7 @@ def graphql_context(
     mock_browse_file_service: MagicMock,
     mock_batch_operation_service: MagicMock,
     mock_migration_service: MagicMock,
+    mock_migration_batch_service: MagicMock,
     mock_migration_dispatcher: MagicMock,
     mock_progress_bus: MagicMock,
     mock_progress_publisher: MagicMock,
@@ -288,6 +295,7 @@ def graphql_context(
         ContextEnum.BATCH_OPERATION_SERVICE: mock_batch_operation_service,
         ContextEnum.CATALOG_SERVICE: real_catalog_service,
         ContextEnum.MIGRATION_SERVICE: mock_migration_service,
+        ContextEnum.MIGRATION_BATCH_SERVICE: mock_migration_batch_service,
         ContextEnum.MIGRATION_DISPATCHER: mock_migration_dispatcher,
         ContextEnum.PROGRESS_BUS: mock_progress_bus,
         ContextEnum.PROGRESS_PUBLISHER: mock_progress_publisher,

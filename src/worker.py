@@ -16,6 +16,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 
+from bson import ObjectId
 from redis.asyncio import Redis
 from taskiq import AsyncBroker, TaskiqEvents, TaskiqState
 
@@ -24,6 +25,7 @@ from src.db.setup_mongo import setup_mongo
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.series_service import SeriesService
 from src.features.migration.device_slots import DeviceSlots
+from src.features.migration.migration_batch import BatchWindow, MigrationBatchService
 from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task import MigrationTaskModel
 from src.logger import get_logger, setup_logger
@@ -65,6 +67,8 @@ class MigrationWorker:
         )
         self.publisher = ProgressPublisher(redis, settings.cache_config.key_prefix)
         self.dispatcher = TaskDispatcher(broker, MigrationTaskModel)
+        self.batches = MigrationBatchService(self.service)
+        self.window = BatchWindow()
         self._reconcile_interval = settings.tasks.reconcile_interval
         self._reconciler: asyncio.Task | None = None
 
@@ -72,11 +76,40 @@ class MigrationWorker:
         """
         The job behind every message on the migration queue.
 
+        A child of a batch only runs while the batch has a free place in the window;
+        otherwise the delivery is dropped and the child stays PENDING until a sibling
+        that ends sends it again.
+
         :param task_id: String form of the task's ObjectId.
         :type task_id: str
         :rtype: None
         """
-        await self.publisher.relay(self.service.run_task(task_id))
+        task = await MigrationTaskModel.get(ObjectId(task_id))
+        if task is None or task.batch_id is None:
+            await self.publisher.relay(self.service.run_task(task_id))
+            return
+
+        batch_id = str(task.batch_id)
+        if not self.window.admit(batch_id, task_id):
+            logger.info(f"Batch {batch_id} is at its window; leaving task {task_id} queued")
+            return
+        try:
+            await self.publisher.relay(self.service.run_task(task_id), batch_id)
+        finally:
+            self.window.release(batch_id, task_id)
+        await self._move_batch_on(batch_id)
+
+    async def _move_batch_on(self, batch_id: str) -> None:
+        # A failure here strands nothing: reconciliation re-sends PENDING children, and the
+        # next child to end settles the batch again.
+        try:
+            for next_id in await self.batches.next_to_dispatch(
+                batch_id, held=self.window.held(batch_id), limit=self.window.free(batch_id)
+            ):
+                await self.dispatcher.submit(next_id)
+            await self.batches.settle(batch_id)
+        except Exception as e:
+            logger.warning(f"Could not move batch {batch_id} on: {e}")
 
     async def start(self) -> None:
         """

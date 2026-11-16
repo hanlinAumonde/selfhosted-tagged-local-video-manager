@@ -1,7 +1,7 @@
 from enum import StrEnum
 from time import time
 
-from beanie.operators import Eq, Or, Set
+from beanie.operators import Eq, Or, Set, LT
 from bson import ObjectId
 from taskiq import AsyncBroker
 from taskiq.exceptions import SendTaskError
@@ -122,7 +122,11 @@ class TaskDispatcher:
         cutoff = time() - stale_after
         stale = await model.find(
             model.status == TaskStatus.PENDING,
-            Or(Eq(model.dispatched_at, None), model.dispatched_at <= cutoff),
+            #Or(Eq(model.dispatched_at, None), model.dispatched_at <= cutoff),
+            Or(
+                Eq(model.dispatched_at, None),
+                LT(model.dispatched_at, cutoff)
+            )
         ).to_list()
         for task in stale:
             await self.submit(str(task.id))

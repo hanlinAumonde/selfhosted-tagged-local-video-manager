@@ -4,6 +4,7 @@ from src.features.catalog.video import VideoModel
 from src.features.catalog.series import SeriesModel
 from src.features.catalog.video_tag import VideoTagModel
 from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.migration.migration_batch import MigrationBatchModel
 from src.features.migration.migration_task import MigrationTaskModel
 from src.config import MongoConfig
 from src.logger import get_logger
@@ -22,5 +23,15 @@ async def setup_mongo(mongo_config: MongoConfig):
     client = AsyncMongoClient(mongo_uri)
 
     #initialize Beanie with the client and database name
-    await init_beanie(database=client.get_database(mongo_config.database), document_models=[VideoModel, VideoTagModel, DirMetadataModel, MigrationTaskModel, SeriesModel])
+    await init_beanie(
+        database=client.get_database(mongo_config.database), 
+        document_models=[
+            VideoModel, 
+            VideoTagModel, 
+            DirMetadataModel, 
+            MigrationTaskModel, 
+            MigrationBatchModel, 
+            SeriesModel
+        ]
+    )
     logger.info("MongoDB setup complete")

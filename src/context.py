@@ -13,6 +13,7 @@ from src.features.catalog.catalog_service import CatalogService
 from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
+from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
 from src.features.migration.migration_task import MigrationTaskModel
 from src.platform.jobs.dispatch import Queue, TaskDispatcher, open_dispatcher
@@ -37,6 +38,7 @@ class ContextEnum(Enum):
     CATALOG_SERVICE = CatalogService
     BATCH_OPERATION_SERVICE = BatchOperationService
     MIGRATION_SERVICE = MigrationService
+    MIGRATION_BATCH_SERVICE = MigrationBatchService
     MIGRATION_DISPATCHER = TaskDispatcher
     PROGRESS_BUS = ProgressBus
     PROGRESS_PUBLISHER = ProgressPublisher
@@ -203,6 +205,11 @@ def get_migration_service(
         )
     return _migration_service
 
+def get_migration_batch_service(
+    migration_service=Depends(get_migration_service),
+) -> MigrationBatchService:
+    return MigrationBatchService(migration_service)
+
 @dataclass
 class TaskInfrastructure:
     """
@@ -289,6 +296,7 @@ async def get_context(
     batch_operation_service: BatchOperationService = Depends(get_batch_operation_service),
     catalog_service: CatalogService = Depends(get_catalog_service),
     migration_service: MigrationService = Depends(get_migration_service),
+    migration_batch_service: MigrationBatchService = Depends(get_migration_batch_service),
     migration_dispatcher: TaskDispatcher = Depends(get_migration_dispatcher),
     progress_bus: ProgressBus = Depends(get_progress_bus),
     progress_publisher: ProgressPublisher = Depends(get_progress_publisher),
@@ -306,6 +314,7 @@ async def get_context(
         ContextEnum.BATCH_OPERATION_SERVICE: batch_operation_service,
         ContextEnum.CATALOG_SERVICE: catalog_service,
         ContextEnum.MIGRATION_SERVICE: migration_service,
+        ContextEnum.MIGRATION_BATCH_SERVICE: migration_batch_service,
         ContextEnum.MIGRATION_DISPATCHER: migration_dispatcher,
         ContextEnum.PROGRESS_BUS: progress_bus,
         ContextEnum.PROGRESS_PUBLISHER: progress_publisher,

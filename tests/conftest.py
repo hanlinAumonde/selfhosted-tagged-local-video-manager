@@ -11,6 +11,7 @@ import pytest
 
 from src import config
 from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.migration.migration_batch import MigrationBatchModel
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.config import Settings
 from src.features.catalog.series import SeriesModel
@@ -92,7 +93,7 @@ async def init_db(mock_get_settings, test_settings: Settings):
         mongo_uri += mongo_host_port
     print(f"Connecting to MongoDB at {mongo_uri}")
     client = AsyncMongoClient(mongo_uri)
-    await init_beanie(database=client.get_database(mongo_config.database), document_models=[VideoModel, VideoTagModel, DirMetadataModel, MigrationTaskModel, SeriesModel])
+    await init_beanie(database=client.get_database(mongo_config.database), document_models=[VideoModel, VideoTagModel, DirMetadataModel, MigrationTaskModel, MigrationBatchModel, SeriesModel])
 
     yield
     await SeriesModel.delete_all()
@@ -100,6 +101,7 @@ async def init_db(mock_get_settings, test_settings: Settings):
     await VideoTagModel.delete_all()
     await DirMetadataModel.delete_all()
     await MigrationTaskModel.delete_all()
+    await MigrationBatchModel.delete_all()
 
 
 # -----------------------------------------------------------------------

@@ -8,7 +8,9 @@ from src.config import Settings
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.series_service import SeriesService
 from src.features.migration.device_slots import DeviceSlots
+from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MigrationService
+from tests.unit.features.migration.batch_helpers import record_directory_refreshes
 from src.platform.cache.cache_service import CacheService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
@@ -95,3 +97,15 @@ def two_cat_migration_svc(
         dir_metadata_service=dir_meta,
         series_service=SeriesService(),
     )
+
+
+@pytest.fixture
+def batch_svc(two_cat_migration_svc: MigrationService) -> MigrationBatchService:
+    return MigrationBatchService(two_cat_migration_svc)
+
+
+@pytest.fixture
+def refreshed_dirs(two_cat_migration_svc: MigrationService) -> list[tuple[str, str]]:
+    """Records every directory whose metadata is refreshed, as ``(category, DB path)``,
+    while still letting the real refresh run."""
+    return record_directory_refreshes(two_cat_migration_svc)

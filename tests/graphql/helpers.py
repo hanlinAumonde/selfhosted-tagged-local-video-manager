@@ -351,6 +351,7 @@ query GetMigrationTasks($input: MigrationTaskQueryInput!) {
       status
       fileName
       fileSize
+      batchId
     }
     totalCount
     page
@@ -385,6 +386,60 @@ subscription MigrationRetry($input: MigrationTaskActionInput!) {
     message
   }
 }
+"""
+
+
+MIGRATION_BATCH_PREFLIGHT = """
+mutation MigrationBatchPreflight($input: MigrationBatchPreflightInput!) {
+  migrationBatchPreflight(input: $input) {
+    valid
+    totalSize
+    spaceAvailable
+    spaceSufficient
+    items {
+      sourceVideoId
+      result { valid sourceFileSize alreadyMigrating errorMessage }
+    }
+  }
+}
+"""
+
+
+CREATE_MIGRATION_BATCH = """
+mutation CreateMigrationBatch($input: CreateMigrationBatchInput!) {
+  createMigrationBatch(input: $input) {
+    batchId
+    tasks { id fileName status batchId }
+    skipped { sourceVideoId reason }
+  }
+}
+"""
+
+
+_BATCH_SUMMARY_FIELDS = "batchId total active completed failed cancelled"
+
+
+CANCEL_MIGRATION_BATCH = f"""
+mutation CancelMigrationBatch($input: MigrationBatchActionInput!) {{
+  cancelMigrationBatch(input: $input) {{ {_BATCH_SUMMARY_FIELDS} }}
+}}
+"""
+
+
+RETRY_MIGRATION_BATCH = f"""
+mutation RetryMigrationBatch($input: MigrationBatchActionInput!) {{
+  retryMigrationBatch(input: $input) {{ {_BATCH_SUMMARY_FIELDS} }}
+}}
+"""
+
+
+MIGRATION_BATCH_PROGRESS = f"""
+subscription MigrationBatchProgress($input: MigrationBatchActionInput!) {{
+  migrationBatchProgress(input: $input) {{
+    summary {{ {_BATCH_SUMMARY_FIELDS} }}
+    task {{ taskId status bytesTransferred totalBytes }}
+  }}
+}}
 """
 
 

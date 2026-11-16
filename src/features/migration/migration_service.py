@@ -13,7 +13,7 @@ from pymongo.errors import DuplicateKeyError
 from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
-from src.features.migration.device_slots import Device, DeviceSlots
+from src.features.migration.device_slots import DeviceSlots
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
 from src.features.catalog.series_service import SeriesService
@@ -29,6 +29,8 @@ logger = get_logger("migration_service")
 #: is written down exactly once.
 MIGRATION_EXECUTOR_KEY = "migration"
 
+_ACTIVE_STATUSES = [s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES]
+
 
 @dataclass
 class MigrationPreflightResult:
@@ -40,6 +42,44 @@ class MigrationPreflightResult:
     already_migrating: bool
     same_location: bool
     error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class _Destination:
+    """Where a source file would land in a target directory, before any conflict handling."""
+
+    file_size: int
+    file_name: str
+    target_fs_path: str
+    target_db_path: str
+
+
+@dataclass(frozen=True)
+class _Route:
+    """The storages and FS-format paths one task's phases work on."""
+
+    source: BaseResourceHandler
+    target: BaseResourceHandler
+    source_fs_path: str
+    target_fs_path: str
+    #: Where phase 1 writes: the target itself, or a staging file for an overwrite that
+    #: the storage cannot do atomically.
+    write_fs: str
+    #: An overwrite whose finished write already is the replacement, so there is no
+    #: partial copy of ours to discard.
+    replaces_in_place: bool
+
+    @property
+    def same_storage(self) -> bool:
+        # A path means nothing to another storage, so storage-side shortcuts (link, rename,
+        # server-side copy) only apply within one handler: linking to an S3 key would
+        # create a stray local file named after it.
+        return self.source is self.target
+
+    @property
+    def may_skip_copy(self) -> bool:
+        """Whether a link or a rename is worth attempting."""
+        return self.same_storage and self.source.moves_without_copying
 
 
 class MigrationService(TaskStateMachine[MigrationTaskModel]):
@@ -66,159 +106,6 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         self.seriesService = series_service
         self.copy_slots = copy_slots
 
-    def _processing_slot(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
-        """
-        Hold a copy slot on the source's and the target's device while the file copies.
-        When the source and target are on the same device, it won't request any slots
-
-        :param task: The PENDING task about to be claimed.
-        :type task: MigrationTaskModel
-        :return: The slots to hold, or nothing when this service has no limits.
-        :rtype: AbstractAsyncContextManager
-        """
-        if self._skips_slots(task):
-            return nullcontext()
-        return self._copy_slots_for(task)
-
-    def _copy_slots_for(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
-        if self.copy_slots is None:
-            return nullcontext()
-        return self.copy_slots.hold(self._devices_of(task))
-
-    def _devices_of(self, task: MigrationTaskModel) -> list[Device]:
-        target_db = task.renamed_target_path or task.target_path
-        return self.copy_slots.devices_of(task.source_path, target_db)
-
-    def _may_move_without_copying(self, task: MigrationTaskModel) -> bool:
-        """
-        Whether a link or a rename is worth attempting for this task.
-
-        Limited to one handler because a path means nothing to another storage: linking
-        to an S3 key would create a stray local file named after it.
-
-        :param task: The task about to run.
-        :type task: MigrationTaskModel
-        :return: True if the file might reach its target with no bytes rewritten.
-        :rtype: bool
-        """
-        source_handler, target_handler, _, _ = self._resolve_paths(task)
-        return source_handler is target_handler and source_handler.moves_without_copying
-
-    def _skips_slots(self, task: MigrationTaskModel) -> bool:
-        """
-        Whether this task should start without queueing for slots.
-
-        A link or a rename moves no bytes, yet a slot is taken before the claim, so it
-        would otherwise wait behind whichever long copy holds its device.
-
-        :param task: The task about to run.
-        :type task: MigrationTaskModel
-        :return: True if the source and target are on one device and no copy is expected.
-        :rtype: bool
-        """
-        if self.copy_slots is None or not self._may_move_without_copying(task):
-            return False
-        source_device, target_device = self._devices_of(task)
-        return source_device.name == target_device.name
-
-    # ------------------------------------------------------------------
-    # Path resolution
-    # ------------------------------------------------------------------
-
-    def _resolve_paths(
-        self, task: MigrationTaskModel
-    ) -> tuple[BaseResourceHandler, BaseResourceHandler, str, str]:
-        """
-        Work out the two storage handlers and the two FS-format paths a task operates on.
-
-        Migration is the task type that happens to have a source *and* a target; the
-        template knows nothing about either, so each phase resolves what it needs here.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :return: ``(source_handler, target_handler, source_fs, target_fs)``, with the
-            target already resolved for any rename.
-        :rtype: tuple[BaseResourceHandler, BaseResourceHandler, str, str]
-        """
-        source_handler = self.resourceHandlerService.get_handler(task.source_category)
-        target_handler = self.resourceHandlerService.get_handler(task.target_category)
-
-        source_fs = source_handler.convert_to_FS_format_path(task.source_path)
-        target_db = task.renamed_target_path or task.target_path
-        target_fs = target_handler.convert_to_FS_format_path(target_db)
-
-        return source_handler, target_handler, source_fs, target_fs
-
-    @staticmethod
-    def _replaces_in_place(task: MigrationTaskModel, handler: BaseResourceHandler) -> bool:
-        """An overwrite on storage that needs no staging: a finished write is the replacement."""
-        return task.conflict_strategy == "overwrite" and handler.writes_atomically
-
-    def _write_path(
-        self, task: MigrationTaskModel, handler: BaseResourceHandler, target_fs: str
-    ) -> str:
-        """
-        Where the first phase puts the file.
-
-        An overwrite on storage without atomic writes goes to a staging file, because what
-        sits at the target belongs to another video until the migration can no longer stop.
-        The name leaves out the file's own so it cannot exceed the filesystem's limit, and
-        ``.part`` keeps it out of directory listings.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :param handler: Storage handler for the target category.
-        :type handler: BaseResourceHandler
-        :param target_fs: Final target path in FS format.
-        :type target_fs: str
-        :return: FS-format path to write to.
-        :rtype: str
-        """
-        if task.conflict_strategy != "overwrite" or handler.writes_atomically:
-            return target_fs
-        return handler.join_path(handler.dirname(target_fs), f".migrating-{task.id}.part")
-
-    async def _discard_partial_copy(
-        self, task: MigrationTaskModel, handler: BaseResourceHandler, target_fs: str
-    ) -> None:
-        """
-        Remove what the first phase wrote, and nothing else.
-
-        :param task: The task being rewound or stopped.
-        :type task: MigrationTaskModel
-        :param handler: Storage handler for the target category.
-        :type handler: BaseResourceHandler
-        :param target_fs: Final target path in FS format.
-        :type target_fs: str
-        :rtype: None
-        """
-        if self._replaces_in_place(task, handler):
-            return
-        await self._cleanup_target(handler, self._write_path(task, handler, target_fs))
-
-    async def _compensate_before_resume(
-        self, task: MigrationTaskModel, start_from: TaskStatus
-    ) -> None:
-        """
-        Remove the half-written target file left by a copy that died mid-flight.
-
-        Only the copy phase leaves anything behind: the DB update and the source deletion
-        are both idempotent and safe to replay as-is. Resetting the byte counter keeps the
-        task list from showing progress the restarted copy has not made yet.
-
-        :param task: The task about to be re-queued.
-        :type task: MigrationTaskModel
-        :param start_from: The phase it will resume at.
-        :type start_from: TaskStatus
-        :rtype: None
-        """
-        if start_from != TaskStatus.PROCESSING:
-            return
-
-        _, target_handler, _, target_fs = self._resolve_paths(task)
-        await self._discard_partial_copy(task, target_handler, target_fs)
-        task.set_progress(0)
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -242,14 +129,8 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :return: The findings, with ``valid`` summarising whether creation may proceed.
         :rtype: MigrationPreflightResult
         """
-        source_handler = source_path.handler
-        target_handler = target_dir_path.handler
-
-        source_fs = source_path.FS_format_path()
-        target_dir_fs = target_dir_path.FS_format_path()
-
-        source_info = await source_handler.stat(source_fs)
-        if source_info is None:
+        destination = await self._locate(source_path, target_dir_path)
+        if destination is None:
             return MigrationPreflightResult(
                 valid=False,
                 source_file_size=0,
@@ -261,47 +142,34 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 error_message="source file does not exist",
             )
 
-        file_size = int(source_info.size)
-        filename = source_fs.rsplit("/", 1)[-1]
-
-        target_file_fs = target_handler.join_path(target_dir_fs, filename)
-
+        target_handler = target_dir_path.handler
         source_db = source_path.DB_format_path()
-        target_db = target_handler.convert_to_DB_format_path(target_file_fs)
-        same_location = source_db == target_db
-
+        same_location = source_db == destination.target_db_path
         conflict_exists = (
-            not same_location and await target_handler.stat(target_file_fs) is not None
+            not same_location and await target_handler.stat(destination.target_fs_path) is not None
         )
-
         already_migrating = await self._is_actively_migrating(source_db)
+        space_available = await target_handler.get_available_space(target_dir_path.FS_format_path())
+        space_sufficient = None if space_available is None else space_available >= destination.file_size
 
-        space_available = await target_handler.get_available_space(target_dir_fs)
-        if space_available is not None:
-            space_sufficient = space_available >= file_size
-        else:
-            space_sufficient = None
-
-        errors: list[str] = []
-        if same_location:
-            errors.append("source path and target path are the same")
-        if already_migrating:
-            errors.append("the file already has an active migration task")
-        if space_sufficient is False:
-            errors.append("insufficient space available at the target location")
-
-        valid = len(errors) == 0
-        error_message = ";".join(errors) if errors else None
-
+        errors = [
+            message
+            for failed, message in (
+                (same_location, "source path and target path are the same"),
+                (already_migrating, "the file already has an active migration task"),
+                (space_sufficient is False, "insufficient space available at the target location"),
+            )
+            if failed
+        ]
         return MigrationPreflightResult(
-            valid=valid,
-            source_file_size=file_size,
+            valid=not errors,
+            source_file_size=destination.file_size,
             conflict_exists=conflict_exists,
             space_available=space_available,
             space_sufficient=space_sufficient,
             already_migrating=already_migrating,
             same_location=same_location,
-            error_message=error_message,
+            error_message=";".join(errors) or None,
         )
 
     async def create_task(
@@ -309,6 +177,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         source_path: AbsolutePath,
         target_dir_path: AbsolutePath,
         conflict_strategy: str | None,
+        batch_id: ObjectId | None = None,
     ) -> MigrationTaskModel:
         """
         Persist a PENDING migration task, resolving any name conflict up front.
@@ -329,54 +198,42 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             the caller believes there is no conflict. Only consulted if the target name is
             actually taken.
         :type conflict_strategy: str | None
+        :param batch_id: The batch this task is a child of, if any.
+        :type batch_id: ObjectId | None
         :return: The inserted task, in PENDING status.
         :rtype: MigrationTaskModel
         :raises InputValidationError: If the source is gone, the strategy is ``"skip"`` or
             missing while a conflict exists, or the file already has an active task.
         """
-        source_handler = source_path.handler
-        target_handler = target_dir_path.handler
-
-        source_fs = source_path.FS_format_path()
-        target_dir_fs = target_dir_path.FS_format_path()
-
-        source_info = await source_handler.stat(source_fs)
-        if source_info is None:
+        destination = await self._locate(source_path, target_dir_path)
+        if destination is None:
             raise InputValidationError(field="source_path", issue="source file does not exist")
 
-        file_size = int(source_info.size)
-        filename = source_fs.rsplit("/", 1)[-1]
-        file_name_no_ext = source_handler.get_filename_without_extension(filename)
-
-        target_file_fs = target_handler.join_path(target_dir_fs, filename)
-        target_db = target_handler.convert_to_DB_format_path(target_file_fs)
-
+        target_handler = target_dir_path.handler
         renamed_target_path: str | None = None
-
-        if await target_handler.stat(target_file_fs) is not None:
-            if conflict_strategy == "overwrite":
-                pass
-            elif conflict_strategy == "rename":
-                target_file_fs = await self._generate_unique_name(target_handler, target_dir_fs, filename)
-                renamed_target_path = target_handler.convert_to_DB_format_path(target_file_fs)
+        if await target_handler.stat(destination.target_fs_path) is not None:
+            if conflict_strategy == "rename":
+                renamed_fs_path = await self._generate_unique_name(
+                    target_handler, target_dir_path.FS_format_path(), destination.file_name
+                )
+                renamed_target_path = target_handler.convert_to_DB_format_path(renamed_fs_path)
             elif conflict_strategy == "skip":
                 raise InputValidationError(field="conflict_strategy", issue="user chose to skip, task not created")
-            else:
+            elif conflict_strategy != "overwrite":
                 raise InputValidationError(field="conflict_strategy", issue="target exists with same name but no conflict strategy specified")
 
-        actual_target_db = renamed_target_path or target_db
         now = time.time()
-
         task = MigrationTaskModel(
             source_path=source_path.DB_format_path(),
             source_category=source_path.category,
-            target_path=actual_target_db,
+            target_path=renamed_target_path or destination.target_db_path,
             target_category=target_dir_path.category,
-            file_name=file_name_no_ext,
-            file_size=file_size,
+            file_name=source_path.handler.get_filename_without_extension(destination.file_name),
+            file_size=destination.file_size,
             status=TaskStatus.PENDING,
             conflict_strategy=conflict_strategy,
             renamed_target_path=renamed_target_path,
+            batch_id=batch_id,
             created_at=now,
             updated_at=now,
         )
@@ -417,23 +274,22 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :rtype: MigrationTaskModel
         :raises InputValidationError: If the task does not exist, or is past the copy.
         """
-        model = MigrationTaskModel
         oid = ObjectId(task_id)
         now = time.time()
 
-        settled = await model.find_one(
-            model.id == oid,
-            model.status == TaskStatus.PENDING,
-            In(model.resume_from, [None, TaskStatus.PROCESSING]),
+        settled = await MigrationTaskModel.find_one(
+            MigrationTaskModel.id == oid,
+            MigrationTaskModel.status == TaskStatus.PENDING,
+            In(MigrationTaskModel.resume_from, [None, TaskStatus.PROCESSING]),
         ).update(Set({
-            model.status: TaskStatus.CANCELLED,
-            model.updated_at: now,
-            model.completed_at: now,
+            MigrationTaskModel.status: TaskStatus.CANCELLED,
+            MigrationTaskModel.updated_at: now,
+            MigrationTaskModel.completed_at: now,
         }))
         if not settled.matched_count:
-            flagged = await model.find_one(
-                model.id == oid, model.status == TaskStatus.PROCESSING
-            ).update(Set({model.cancel_requested: True}))
+            flagged = await MigrationTaskModel.find_one(
+                MigrationTaskModel.id == oid, MigrationTaskModel.status == TaskStatus.PROCESSING
+            ).update(Set({MigrationTaskModel.cancel_requested: True}))
             if not flagged.matched_count:
                 task = await MigrationTaskModel.get(oid)
                 if task is None:
@@ -495,7 +351,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         return start_from
 
     async def list_tasks(
-        self, status_filter: list[str] | None, page: int, page_size: int
+        self,
+        status_filter: list[str] | None,
+        page: int,
+        page_size: int,
+        batch_id: str | None = None,
     ) -> tuple[list[MigrationTaskModel], int]:
         """
         Fetch a page of migration tasks, newest first.
@@ -506,20 +366,24 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         :type page: int
         :param page_size: Rows per page.
         :type page_size: int
+        :param batch_id: Only the children of this batch, or None for every task.
+        :type batch_id: str | None
         :return: The page of tasks, and how many match the filter in total.
         :rtype: tuple[list[MigrationTaskModel], int]
         """
         query_filter: dict = {}
         if status_filter:
             query_filter["status"] = {"$in": status_filter}
+        if batch_id:
+            query_filter["batch_id"] = ObjectId(batch_id)
 
         total_count = await MigrationTaskModel.find(query_filter).count()
         tasks = (
             await MigrationTaskModel.find(query_filter)
-            .sort([("created_at", pymongo.DESCENDING)])
-            .skip((page - 1) * page_size)
-            .limit(page_size)
-            .to_list()
+                .sort([("created_at", pymongo.DESCENDING)])
+                .skip((page - 1) * page_size)
+                .limit(page_size)
+                .to_list()
         )
         return tasks, total_count
 
@@ -538,14 +402,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         wanted = {path for path in db_paths if path}
         if not wanted:
             return set()
-    
-        active_statuses = [
-            s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES
-        ]
+
         path_list = list(wanted)
         tasks = await MigrationTaskModel.find(
             {
-                "status": {"$in": active_statuses},
+                "status": {"$in": _ACTIVE_STATUSES},
                 "$or": [
                     {"source_path": {"$in": path_list}},
                     {"target_path": {"$in": path_list}},
@@ -553,7 +414,7 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
                 ],
             }
         ).to_list()
-    
+
         # A matched task may reference paths outside the requested set, so intersect rather
         # than taking every path it mentions.
         return {
@@ -578,69 +439,124 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         """
         return db_path in await self.locked_paths([db_path])
 
+    async def refresh_directory_metadata(self, tasks: Iterable[MigrationTaskModel]) -> None:
+        """
+        Recompute the aggregates of every directory these migrations moved a file out of
+        or into, each directory once.
+
+        Best effort: a failure is logged per directory, since the files have already moved.
+
+        :param tasks: Migrations that have put their file at the target.
+        :type tasks: Iterable[MigrationTaskModel]
+        :rtype: None
+        """
+        directories: dict[tuple[str, str], None] = {}
+        for task in tasks:
+            directories[(task.source_category, task.source_path.rsplit("/", 1)[0])] = None
+            directories[(task.target_category, task.final_target_path.rsplit("/", 1)[0])] = None
+
+        for category, dir_db in directories:
+            try:
+                handler = self.resourceHandlerService.get_handler(category)
+                directory = AbsolutePath.from_existing_path(dir_db, category, handler)
+                await self.dirMetadataService.update_directory_metadata_forward(directory)
+            except Exception as e:
+                logger.warning(f"Directory metadata update failed for {dir_db}: {e}")
+
     # ------------------------------------------------------------------
-    # Filesystem helpers
+    # Helpers
     # ------------------------------------------------------------------
+
+    async def _locate(
+        self, source_path: AbsolutePath, target_dir_path: AbsolutePath
+    ) -> _Destination | None:
+        """Where the source would land under its own name; None if the source is gone."""
+        source_fs_path = source_path.FS_format_path()
+        source_info = await source_path.handler.stat(source_fs_path)
+        if source_info is None:
+            return None
+
+        target_handler = target_dir_path.handler
+        file_name = source_fs_path.rsplit("/", 1)[-1]
+        target_fs_path = target_handler.join_path(target_dir_path.FS_format_path(), file_name)
+        return _Destination(
+            file_size=int(source_info.size),
+            file_name=file_name,
+            target_fs_path=target_fs_path,
+            target_db_path=target_handler.convert_to_DB_format_path(target_fs_path),
+        )
 
     async def _is_actively_migrating(self, db_path: str) -> bool:
-        """
-        Check whether a path is the source of a task that has not settled yet.
+        # Narrower than ``is_file_locked``, which also covers targets: this one answers
+        # "is this file already on its way out?".
+        query = {"status": {"$in": _ACTIVE_STATUSES}, "source_path": db_path}
+        return await MigrationTaskModel.find(query).count() > 0
 
-        Narrower than ``is_file_locked``, which also covers targets; this one answers
-        "is this file already on its way out?".
+    def _route(self, task: MigrationTaskModel) -> _Route:
+        source = self.resourceHandlerService.get_handler(task.source_category)
+        target = self.resourceHandlerService.get_handler(task.target_category)
+        target_fs_path = target.convert_to_FS_format_path(task.final_target_path)
 
-        :param db_path: Path in DB format.
-        :type db_path: str
-        :return: True if a non-terminal task has this path as its source.
-        :rtype: bool
-        """
-        active_statuses = [
-            s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES
-        ]
-        count = await MigrationTaskModel.find(
-            {
-                "status": {"$in": active_statuses},
-                "source_path": db_path,
-            }
-        ).count()
-        return count > 0
+        overwrite = task.conflict_strategy == "overwrite"
+        if overwrite and not target.writes_atomically:
+            # What sits at the target belongs to another video until the migration can no
+            # longer stop, so the copy is staged beside it. The name leaves out the file's
+            # own so it cannot exceed the filesystem's limit, and ``.part`` keeps it out of
+            # directory listings.
+            write_fs = target.join_path(target.dirname(target_fs_path), f".migrating-{task.id}.part")
+        else:
+            write_fs = target_fs_path
+
+        return _Route(
+            source=source,
+            target=target,
+            source_fs_path=source.convert_to_FS_format_path(task.source_path),
+            target_fs_path=target_fs_path,
+            write_fs=write_fs,
+            replaces_in_place=overwrite and target.writes_atomically,
+        )
+
+    def _copy_slots(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
+        if self.copy_slots is None:
+            return nullcontext()
+        return self.copy_slots.hold(
+            self.copy_slots.devices_of(task.source_path, task.final_target_path)
+        )
+
+    def _may_skip_slots(self, task: MigrationTaskModel) -> bool:
+        # A link or a rename moves no bytes, yet the slot is taken before the claim, so it
+        # would otherwise wait behind whichever long copy holds its device. Such a task
+        # takes its slots later, only if it turns out to need a copy after all.
+        if self.copy_slots is None or not self._route(task).may_skip_copy:
+            return False
+        source_device, target_device = self.copy_slots.devices_of(
+            task.source_path, task.final_target_path
+        )
+        return source_device.name == target_device.name
+
+    async def _discard_partial_copy(self, route: _Route) -> None:
+        """Remove what the first phase wrote, and nothing else."""
+        if not route.replaces_in_place:
+            await self._cleanup_target(route.target, route.write_fs)
 
     @staticmethod
-    async def _cleanup_target(handler: BaseResourceHandler, target_fs: str) -> None:
+    async def _cleanup_target(handler: BaseResourceHandler, target_fs_path: str) -> None:
         """
         Delete a partially written target file, best effort.
 
         Never raises: this runs on paths that are already handling a cancellation, a
         failure or a crash recovery, where a cleanup problem must not mask the original
         cause.
-
-        :param handler: Storage handler for the target category.
-        :type handler: BaseResourceHandler
-        :param target_fs: Target path in FS format.
-        :type target_fs: str
-        :rtype: None
         """
         try:
-            if await handler.stat(target_fs) is not None:
-                await handler.delete_file(target_fs)
+            if await handler.stat(target_fs_path) is not None:
+                await handler.delete_file(target_fs_path)
         except Exception as e:
-            logger.warning(f"Failed to cleanup target file {target_fs}: {e}")
+            logger.warning(f"Failed to cleanup target file {target_fs_path}: {e}")
 
     @staticmethod
     async def _generate_unique_name(handler: BaseResourceHandler, dir_fs: str, filename: str) -> str:
-        """
-        Find a free ``name(n).ext`` variant in a directory, for the "rename" conflict
-        strategy.
-
-        :param handler: Storage handler for the directory's category.
-        :type handler: BaseResourceHandler
-        :param dir_fs: Target directory in FS format.
-        :type dir_fs: str
-        :param filename: Desired file name, including extension.
-        :type filename: str
-        :return: Full FS-format path of the first name not already taken.
-        :rtype: str
-        """
+        """The first free ``name(n).ext`` in a directory, as a full FS-format path."""
         name_no_ext = handler.get_filename_without_extension(filename)
         ext = handler.get_file_extension(filename)
         suffix = f".{ext}" if ext else ""
@@ -650,6 +566,31 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             if await handler.stat(candidate) is None:
                 return candidate
             counter += 1
+
+    # ------------------------------------------------------------------
+    # Template hooks
+    # ------------------------------------------------------------------
+
+    def _processing_slot(self, task: MigrationTaskModel) -> AbstractAsyncContextManager:
+        """Copy slots on the source's and the target's device, held while the file copies."""
+        if self._may_skip_slots(task):
+            return nullcontext()
+        return self._copy_slots(task)
+
+    async def _compensate_before_resume(
+        self, task: MigrationTaskModel, start_from: TaskStatus
+    ) -> None:
+        """
+        Remove the half-written target file left by a copy that died mid-flight.
+
+        Only the copy phase leaves anything behind: the DB update and the source deletion
+        are both idempotent and safe to replay as-is. Resetting the byte counter keeps the
+        task list from showing progress the restarted copy has not made yet.
+        """
+        if start_from != TaskStatus.PROCESSING:
+            return
+        await self._discard_partial_copy(self._route(task))
+        task.set_progress(0)
 
     # ------------------------------------------------------------------
     # Phase: PROCESSING
@@ -666,31 +607,24 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         in phase 2 instead, once a cancel can no longer land.
 
         On success the task moves to PROCESS_DONE. On cancellation or failure the partial
-        copy is removed, since this phase always restarts from the beginning.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :yield: A frame when the phase starts, one per second while a copy runs, and a
-            final frame on completion or cancellation.
-        :rtype: AsyncGenerator[ProgressFrame, None]
-        :raises Exception: Any copy failure, re-raised after the partial copy is cleaned
-            up, so the state machine can record it as FAILED.
+        copy is removed, since this phase always restarts from the beginning. A copy
+        failure is re-raised after that, so the state machine records it as FAILED.
         """
-        source_handler, target_handler, source_fs, target_fs = self._resolve_paths(task)
-        write_fs = self._write_path(task, target_handler, target_fs)
+        route = self._route(task)
 
         await self._update_task_status(task, TaskStatus.PROCESSING)
         yield self._make_progress(task, message="Starting copy")
 
-        may_skip_copy = self._may_move_without_copying(task)
-        linked = may_skip_copy and await source_handler.link_file(source_fs, write_fs)
-        renames = may_skip_copy and not linked and await source_handler.can_rename(source_fs, target_fs)
+        linked = route.may_skip_copy and await route.source.link_file(route.source_fs_path, route.write_fs)
+        renames = (
+            route.may_skip_copy
+            and not linked
+            and await route.source.can_rename(route.source_fs_path, route.target_fs_path)
+        )
         if not linked and not renames:
-            slots = self._copy_slots_for(task) if self._skips_slots(task) else nullcontext()
+            slots = self._copy_slots(task) if self._may_skip_slots(task) else nullcontext()
             async with slots:
-                async for frame in self._stream_copy(
-                    task, source_handler, target_handler, source_fs, write_fs, target_fs
-                ):
+                async for frame in self._stream_copy(task, route):
                     yield frame
             if task.status == TaskStatus.CANCELLED:
                 return
@@ -698,8 +632,8 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         if not await self._finish_processing(
             task, bytes_transferred=task.file_size, move_by_rename=renames
         ):
-            if not self._replaces_in_place(task, target_handler):
-                yield await self._settle_cancelled(task, target_handler, target_fs, task.file_size)
+            if not route.replaces_in_place:
+                yield await self._settle_cancelled(task, route, task.file_size)
                 return
             # The replaced object went when the upload completed; a cancel can no longer
             # restore it, and stopping now would leave its record pointing at another file.
@@ -710,28 +644,18 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         yield self._make_progress(task, current=task.file_size, message="Copy completed")
 
     async def _settle_cancelled(
-        self,
-        task: MigrationTaskModel,
-        target_handler: BaseResourceHandler,
-        target_fs: str,
-        current: int,
+        self, task: MigrationTaskModel, route: _Route, current: int
     ) -> ProgressFrame:
-        await self._discard_partial_copy(task, target_handler, target_fs)
+        await self._discard_partial_copy(route)
         await self._update_task_status(task, TaskStatus.CANCELLED)
         self._cancel_requested.pop(str(task.id), None)
         return self._make_progress(task, current=current, message="cancelled")
 
     async def _stream_copy(
-        self,
-        task: MigrationTaskModel,
-        source_handler: BaseResourceHandler,
-        target_handler: BaseResourceHandler,
-        source_fs: str,
-        write_fs: str,
-        target_fs: str,
+        self, task: MigrationTaskModel, route: _Route
     ) -> AsyncGenerator[ProgressFrame, None]:
         """
-        Stream the file from source to ``write_fs``, reporting progress each second.
+        Copy the file to ``route.write_fs``, reporting progress each second.
 
         ``write_file_streaming`` consumes its whole iterator inside a single await, which
         would keep this generator's frame suspended for the entire copy and make it unable
@@ -739,29 +663,15 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         reported while the transfer is in flight; ``counting_reader`` sits in between,
         tallying bytes and checking for cancellation on every chunk.
 
-        :param task: The task being executed; left CANCELLED if a cancel stopped the copy.
-        :type task: MigrationTaskModel
-        :param source_handler: Storage handler for the source category.
-        :type source_handler: BaseResourceHandler
-        :param target_handler: Storage handler for the target category.
-        :type target_handler: BaseResourceHandler
-        :param source_fs: Source path in FS format.
-        :type source_fs: str
-        :param write_fs: FS-format path to write to.
-        :type write_fs: str
-        :param target_fs: Final target path in FS format.
-        :type target_fs: str
-        :yield: One frame per second while the copy runs, and one on cancellation.
-        :rtype: AsyncGenerator[ProgressFrame, None]
-        :raises Exception: Any copy failure, after the partial copy is cleaned up.
+        Leaves the task CANCELLED if a cancel stopped the copy; any other failure is
+        re-raised after the partial copy is cleaned up.
         """
         task_id = str(task.id)
         bytes_copied = 0
 
         async def counting_reader():
-            """Feeds the writer while counting bytes and watching for cancellation."""
             nonlocal bytes_copied
-            async for chunk in source_handler.read_file_streaming(source_fs):
+            async for chunk in route.source.read_file_streaming(route.source_fs_path):
                 if self._cancel_requested.get(task_id):
                     raise _MigrationCancelled()
                 bytes_copied += len(chunk)
@@ -775,12 +685,11 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
             bytes_copied = copied
 
         async def copy() -> None:
-            # Only within one handler: a path means nothing to another storage.
-            if source_handler is target_handler and await source_handler.copy_server_side(
-                source_fs, write_fs, report_copied
+            if route.same_storage and await route.source.copy_server_side(
+                route.source_fs_path, route.write_fs, report_copied
             ):
                 return
-            await target_handler.write_file_streaming(write_fs, counting_reader())
+            await route.target.write_file_streaming(route.write_fs, counting_reader())
 
         copy_task = asyncio.create_task(copy())
 
@@ -798,44 +707,18 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         try:
             await copy_task
         except _MigrationCancelled:
-            yield await self._settle_cancelled(task, target_handler, target_fs, bytes_copied)
+            yield await self._settle_cancelled(task, route, bytes_copied)
         except Exception:
-            await self._discard_partial_copy(task, target_handler, target_fs)
+            await self._discard_partial_copy(route)
             raise
 
     # ------------------------------------------------------------------
     # Phase: COMMITTING
     # ------------------------------------------------------------------
 
-    async def _put_file_at_target(self, task: MigrationTaskModel) -> None:
-        """
-        Do the move the first phase left for this one: a rename, or publishing a staged copy.
-
-        Belongs here and not at the end of phase 1: a cancel can only land on a PROCESSING
-        task, so from here on the source's old place and the replaced file are no longer
-        needed. A file already gone from where it would move from was moved by an earlier
-        run of this phase.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :rtype: None
-        :raises Exception: If a file due to be renamed is at neither the source nor the target.
-        """
-        source_handler, target_handler, source_fs, target_fs = self._resolve_paths(task)
-        if task.move_by_rename:
-            if await source_handler.stat(source_fs) is not None:
-                await source_handler.replace_file(source_fs, target_fs)
-            elif await target_handler.stat(target_fs) is None:
-                raise Exception(f"File to migrate not found: {source_fs}")
-            return
-
-        staged_fs = self._write_path(task, target_handler, target_fs)
-        if staged_fs != target_fs and await target_handler.stat(staged_fs) is not None:
-            await target_handler.replace_file(staged_fs, target_fs)
-
     async def _execute_commit(self, task: MigrationTaskModel) -> None:
         """
-        Phase 2 — repoint the video record at its new path and category.
+        Phase 2 — finish the move phase 1 left over, then repoint the video record.
 
         Written to be idempotent, because recovery and retry can both replay this phase
         after it already succeeded. If no record matches the source path, that is only
@@ -844,24 +727,17 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         Under the ``"overwrite"`` strategy the record occupying the target path is deleted
         first — unless it is the very record being moved, which is what a replay looks like.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :rtype: None
-        :raises Exception: If the video record is at neither the source nor the target path.
         """
         await self._update_task_status(task, TaskStatus.COMMITTING)
-        await self._put_file_at_target(task)
+        await self._put_file_at_target(self._route(task), task.move_by_rename)
 
-        target_path = task.renamed_target_path or task.target_path
-
+        target_path = task.final_target_path
         video = await VideoModel.find_one({"path": task.source_path})
 
         if video is None:
             # An interrupted or retried run may already have moved the record. Only treat
             # that as success if the target record really is there.
-            migrated = await VideoModel.find_one({"path": target_path})
-            if migrated is None:
+            if await VideoModel.find_one({"path": target_path}) is None:
                 raise Exception(f"Source video record not found: {task.source_path}")
             logger.info(f"Task {task.id}: video record already at target, skipping DB update")
             await self._update_task_status(task, TaskStatus.COMMITTED)
@@ -879,6 +755,26 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
 
         await self._update_task_status(task, TaskStatus.COMMITTED)
 
+    @staticmethod
+    async def _put_file_at_target(route: _Route, move_by_rename: bool) -> None:
+        """
+        Do the move the first phase left for this one: a rename, or publishing a staged copy.
+
+        Belongs here and not at the end of phase 1: a cancel can only land on a PROCESSING
+        task, so from here on the source's old place and the replaced file are no longer
+        needed. A file already gone from where it would move from was moved by an earlier
+        run of this phase.
+        """
+        if move_by_rename:
+            if await route.source.stat(route.source_fs_path) is not None:
+                await route.source.replace_file(route.source_fs_path, route.target_fs_path)
+            elif await route.target.stat(route.target_fs_path) is None:
+                raise Exception(f"File to migrate not found: {route.source_fs_path}")
+            return
+
+        if route.write_fs != route.target_fs_path and await route.target.stat(route.write_fs) is not None:
+            await route.target.replace_file(route.write_fs, route.target_fs_path)
+
     # ------------------------------------------------------------------
     # Phase: CLEANING_UP
     # ------------------------------------------------------------------
@@ -890,16 +786,10 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         Everything here is best effort. By this point the file has been copied and the
         database already points at the new location, so the migration has succeeded; a
         leftover source file or a stale directory aggregate is worth a warning, not a
-        failure. The task therefore always ends COMPLETED.
-
-        :param task: The task being executed.
-        :type task: MigrationTaskModel
-        :return: A warning to show the user if the source could not be deleted, else None.
-            Metadata refresh failures are only logged.
-        :rtype: str | None
+        failure. The task therefore always ends COMPLETED, and only a failed source
+        deletion is returned as a warning for the user.
         """
-        source_handler, target_handler, source_fs, _ = self._resolve_paths(task)
-
+        route = self._route(task)
         await self._update_task_status(task, TaskStatus.CLEANING_UP)
 
         warning = None
@@ -907,29 +797,14 @@ class MigrationService(TaskStateMachine[MigrationTaskModel]):
         # old path is a new one that someone else put there.
         if not task.move_by_rename:
             try:
-                await source_handler.delete_file(source_fs)
+                await route.source.delete_file(route.source_fs_path)
             except Exception as e:
                 warning = f"Source file deletion failed: {e}"
                 logger.warning(f"Task {task.id}: {warning}")
 
-        try:
-            source_dir_db = source_handler.dirname(task.source_path)
-            source_dir_abs = AbsolutePath.from_existing_path(
-                source_dir_db, task.source_category, source_handler
-            )
-            await self.dirMetadataService.update_directory_metadata_forward(source_dir_abs)
-        except Exception as e:
-            logger.warning(f"Task {task.id}: Source directory metadata update failed: {e}")
-
-        try:
-            target_path = task.renamed_target_path or task.target_path
-            target_dir_db = target_handler.dirname(target_path)
-            target_dir_abs = AbsolutePath.from_existing_path(
-                target_dir_db, task.target_category, target_handler
-            )
-            await self.dirMetadataService.update_directory_metadata_forward(target_dir_abs)
-        except Exception as e:
-            logger.warning(f"Task {task.id}: Target directory metadata update failed: {e}")
+        # A batch refreshes the directories of all its children once, after the last one.
+        if task.batch_id is None:
+            await self.refresh_directory_metadata([task])
 
         await self._update_task_status(task, TaskStatus.COMPLETED)
         return warning

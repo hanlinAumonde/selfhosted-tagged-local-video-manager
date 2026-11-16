@@ -1,8 +1,9 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import json
+from typing import Any
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -20,11 +21,18 @@ LATEST_FRAME_TTL = 60
 #: Looks up a task's stored state, for observers that have no live frame to start from.
 SnapshotFn = Callable[[str], Awaitable[ProgressFrame | None]]
 
+#: Counts a batch's tasks from the store; None when there is no such batch.
+SummarizeFn = Callable[[str], Awaitable[Any]]
+
 _END_OF_STREAM = object()
 
 
 def _progress_channel(prefix: str, task_id: str) -> str:
     return f"{prefix}:task:{task_id}:progress"
+
+
+def _batch_channel(prefix: str, batch_id: str) -> str:
+    return f"{prefix}:batch:{batch_id}:progress"
 
 
 def _latest_key(prefix: str, task_id: str) -> str:
@@ -41,6 +49,20 @@ def _decode(raw: str | bytes) -> ProgressFrame:
 
 def _is_terminal(frame: ProgressFrame) -> bool:
     return frame.status in TaskStateMachine.TERMINAL_STATUSES
+
+
+@dataclass(frozen=True)
+class BatchEvent:
+    """
+    What an observer of a batch receives.
+
+    ``summary`` comes with the opening event, with every task that ends, and from the
+    watchdog — the moments the counts can have changed. ``frame`` is a task's own frame,
+    relayed as is.
+    """
+
+    summary: Any = None
+    frame: ProgressFrame | None = None
 
 
 class ProgressPublisher:
@@ -62,9 +84,9 @@ class ProgressPublisher:
         self._redis = redis
         self._prefix = prefix
 
-    async def publish(self, frame: ProgressFrame) -> None:
+    async def publish(self, frame: ProgressFrame, batch_id: str | None = None) -> None:
         """
-        Send one frame to the task's observers.
+        Send one frame to the task's observers, and to its batch's when it has one.
 
         A Redis failure is logged and swallowed. Progress is advisory: a migration must
         not fail because nobody could be told how far it got, and observers fall back to
@@ -72,27 +94,35 @@ class ProgressPublisher:
 
         :param frame: The frame to deliver.
         :type frame: ProgressFrame
+        :param batch_id: The batch the task belongs to, if any.
+        :type batch_id: str | None
         :rtype: None
         """
         payload = _encode(frame)
         try:
             async with self._redis.pipeline(transaction=False) as pipe:
                 pipe.publish(_progress_channel(self._prefix, frame.task_id), payload)
+                if batch_id is not None:
+                    pipe.publish(_batch_channel(self._prefix, batch_id), payload)
                 pipe.set(_latest_key(self._prefix, frame.task_id), payload, ex=LATEST_FRAME_TTL)
                 await pipe.execute()
         except (RedisError, OSError) as e:
             logger.warning(f"Could not publish progress for task {frame.task_id}: {e}")
 
-    async def relay(self, frames: AsyncIterable[ProgressFrame]) -> None:
+    async def relay(
+        self, frames: AsyncIterable[ProgressFrame], batch_id: str | None = None
+    ) -> None:
         """
         Publish every frame of a run, as it is produced.
 
         :param frames: The frames a state machine yields for one run.
         :type frames: AsyncIterable[ProgressFrame]
+        :param batch_id: The batch the task belongs to, if any.
+        :type batch_id: str | None
         :rtype: None
         """
         async for frame in frames:
-            await self.publish(frame)
+            await self.publish(frame, batch_id)
 
 
 class ProgressBus:
@@ -100,8 +130,9 @@ class ProgressBus:
     The web process's side of the bus: one Redis subscription, fanned out to every client
     watching a task.
 
-    A single pattern subscription covers every task, so attaching an observer never costs
-    a Redis round trip of its own and there is no subscribe/unsubscribe race to get wrong.
+    Two pattern subscriptions, one for tasks and one for batches, cover everything, so
+    attaching an observer never costs a Redis round trip of its own and there is no
+    subscribe/unsubscribe race to get wrong.
     Frames for tasks nobody watches are simply dropped.
 
     Each observer gets its own bounded channel. A full channel drops its oldest frame:
@@ -134,6 +165,7 @@ class ProgressBus:
         self._channel_size = channel_size
 
         self._channels: dict[str, set[asyncio.Queue]] = {}
+        self._batch_channels: dict[str, set[asyncio.Queue]] = {}
         self._pubsub = None
         self._reader: asyncio.Task | None = None
 
@@ -145,7 +177,10 @@ class ProgressBus:
         :rtype: None
         """
         self._pubsub = self._redis.pubsub(ignore_subscribe_messages=True)
-        await self._pubsub.psubscribe(_progress_channel(self._prefix, "*"))
+        await self._pubsub.psubscribe(
+            _progress_channel(self._prefix, "*"), 
+            _batch_channel(self._prefix, "*")
+        )
         self._reader = asyncio.create_task(self._read_loop(), name="progress-bus-reader")
 
     async def stop(self) -> None:
@@ -162,9 +197,10 @@ class ProgressBus:
         if self._pubsub is not None:
             await self._pubsub.aclose()
             self._pubsub = None
-        for channels in self._channels.values():
-            for channel in channels:
-                self._offer(channel, _END_OF_STREAM)
+        for registry in (self._channels, self._batch_channels):
+            for channels in registry.values():
+                for channel in channels:
+                    self._offer(channel, _END_OF_STREAM)
 
     async def observe(
         self, task_id: str, snapshot: SnapshotFn
@@ -224,11 +260,72 @@ class ProgressBus:
                 if _is_terminal(frame):
                     return
         finally:
-            channels = self._channels.get(task_id)
-            if channels is not None:
-                channels.discard(channel)
-                if not channels:
-                    self._channels.pop(task_id, None)
+            self._detach(self._channels, task_id, channel)
+
+    async def observe_batch(
+        self,
+        batch_id: str,
+        summarize: SummarizeFn,
+        is_settled: Callable[[Any], bool],
+    ) -> AsyncGenerator[BatchEvent, None]:
+        """
+        Yield a batch's state, then its tasks' frames, until no task of it is active.
+
+        A pure read, like ``observe``. The summary is opaque here: the bus only fetches it
+        and asks whether it is settled. It is fetched again whenever a task ends, since
+        only then can the counts change, and by the watchdog, since a task cancelled while
+        queued or abandoned by a dead worker ends without a frame.
+
+        :param batch_id: String form of the batch's ObjectId.
+        :type batch_id: str
+        :param summarize: Reads the batch's counts from the store.
+        :type summarize: SummarizeFn
+        :param is_settled: Whether a summary describes a batch with nothing left to run.
+        :type is_settled: Callable[[Any], bool]
+        :yield: The opening summary, then one event per relayed frame.
+        :rtype: AsyncGenerator[BatchEvent, None]
+        """
+        channel: asyncio.Queue = asyncio.Queue(maxsize=self._channel_size)
+        self._batch_channels.setdefault(batch_id, set()).add(channel)
+        try:
+            summary = await summarize(batch_id)
+            if summary is None:
+                return
+            yield BatchEvent(summary=summary)
+            if is_settled(summary):
+                return
+
+            while True:
+                try:
+                    frame = await asyncio.wait_for(channel.get(), self._watchdog_interval)
+                except TimeoutError:
+                    summary = await summarize(batch_id)
+                    if summary is None:
+                        return
+                    if is_settled(summary):
+                        yield BatchEvent(summary=summary)
+                        return
+                    continue
+
+                if frame is _END_OF_STREAM:
+                    return
+                if not _is_terminal(frame):
+                    yield BatchEvent(frame=frame)
+                    continue
+                summary = await summarize(batch_id)
+                yield BatchEvent(summary=summary, frame=frame)
+                if summary is None or is_settled(summary):
+                    return
+        finally:
+            self._detach(self._batch_channels, batch_id, channel)
+
+    @staticmethod
+    def _detach(registry: dict[str, set[asyncio.Queue]], key: str, channel: asyncio.Queue) -> None:
+        channels = registry.get(key)
+        if channels is not None:
+            channels.discard(channel)
+            if not channels:
+                registry.pop(key, None)
 
     async def _read_latest(self, task_id: str) -> ProgressFrame | None:
         try:
@@ -264,12 +361,20 @@ class ProgressBus:
             except (TypeError, ValueError) as e:
                 logger.warning(f"Ignoring malformed progress message: {e}")
                 continue
-            self._broadcast(frame)
+            # A batch task's frame arrives on both channels; each copy goes only to the
+            # observers of the channel it came in on, so nobody sees it twice.
+            if message.get("pattern") == _batch_channel(self._prefix, "*"):
+                batch_id = message["channel"][len(f"{self._prefix}:batch:"):-len(":progress")]
+                self._broadcast(self._batch_channels, batch_id, frame)
+            else:
+                self._broadcast(self._channels, frame.task_id, frame)
 
-    def _broadcast(self, frame: ProgressFrame) -> None:
+    def _broadcast(
+        self, registry: dict[str, set[asyncio.Queue]], key: str, frame: ProgressFrame
+    ) -> None:
         # Synchronous on purpose: with no await inside, an observer detaching cannot change
         # the channel set mid-iteration.
-        for channel in self._channels.get(frame.task_id, ()):
+        for channel in registry.get(key, ()):
             self._offer(channel, frame)
 
     @staticmethod
