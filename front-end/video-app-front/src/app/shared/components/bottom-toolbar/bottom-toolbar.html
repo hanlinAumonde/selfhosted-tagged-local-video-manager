@@ -149,6 +149,14 @@
           </button>
           <button
             mat-menu-item
+            [disabled]="selectedVideoItems().length === 0"
+            (click)="openMigrationPanel()"
+          >
+            <mat-icon fontIcon="drive_file_move"></mat-icon>
+            <span>Migrate</span>
+          </button>
+          <button
+            mat-menu-item
             (click)="openBatchDeleteCheckPanel()"
           >
             <mat-icon fontIcon="delete"></mat-icon>

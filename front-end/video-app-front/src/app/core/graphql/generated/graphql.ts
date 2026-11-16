@@ -37,6 +37,19 @@ export type CreateDirectoryInput = {
   parentPath: RelativePathInput;
 };
 
+export type CreateMigrationBatchInput = {
+  conflictStrategy?: InputMaybe<Scalars['String']['input']>;
+  sourceVideoIds: Array<Scalars['String']['input']>;
+  targetDirRelativePath: RelativePathInput;
+};
+
+export type CreateMigrationBatchResult = {
+  __typename?: 'CreateMigrationBatchResult';
+  batchId?: Maybe<Scalars['ID']['output']>;
+  skipped: Array<SkippedMigrationSource>;
+  tasks: Array<MigrationTask>;
+};
+
 export type CreateMigrationTaskInput = {
   conflictStrategy?: InputMaybe<Scalars['String']['input']>;
   sourceVideoId: Scalars['String']['input'];
@@ -64,6 +77,46 @@ export type DirectoryMutationResult = {
 export type FileBrowseNode = {
   __typename?: 'FileBrowseNode';
   node: Video;
+};
+
+export type MigrationBatchActionInput = {
+  batchId: Scalars['String']['input'];
+};
+
+export type MigrationBatchPreflightInput = {
+  sourceVideoIds: Array<Scalars['String']['input']>;
+  targetDirRelativePath: RelativePathInput;
+};
+
+export type MigrationBatchPreflightItem = {
+  __typename?: 'MigrationBatchPreflightItem';
+  result: MigrationPreflightResult;
+  sourceVideoId: Scalars['ID']['output'];
+};
+
+export type MigrationBatchPreflightResult = {
+  __typename?: 'MigrationBatchPreflightResult';
+  items: Array<MigrationBatchPreflightItem>;
+  spaceAvailable?: Maybe<Scalars['BigInt']['output']>;
+  spaceSufficient?: Maybe<Scalars['Boolean']['output']>;
+  totalSize: Scalars['BigInt']['output'];
+  valid: Scalars['Boolean']['output'];
+};
+
+export type MigrationBatchProgress = {
+  __typename?: 'MigrationBatchProgress';
+  summary?: Maybe<MigrationBatchSummary>;
+  task?: Maybe<MigrationProgressStatus>;
+};
+
+export type MigrationBatchSummary = {
+  __typename?: 'MigrationBatchSummary';
+  active: Scalars['Int']['output'];
+  batchId: Scalars['ID']['output'];
+  cancelled: Scalars['Int']['output'];
+  completed: Scalars['Int']['output'];
+  failed: Scalars['Int']['output'];
+  total: Scalars['Int']['output'];
 };
 
 export type MigrationPreflightInput = {
@@ -107,6 +160,7 @@ export enum MigrationStatusEnum {
 
 export type MigrationTask = {
   __typename?: 'MigrationTask';
+  batchId?: Maybe<Scalars['ID']['output']>;
   bytesTransferred: Scalars['BigInt']['output'];
   completedAt?: Maybe<Scalars['Float']['output']>;
   conflictStrategy?: Maybe<Scalars['String']['output']>;
@@ -145,6 +199,7 @@ export type MigrationTaskMutationResult = {
 };
 
 export type MigrationTaskQueryInput = {
+  batchId?: InputMaybe<Scalars['String']['input']>;
   page?: Scalars['Int']['input'];
   pageSize?: Scalars['Int']['input'];
   statusFilter?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -152,13 +207,22 @@ export type MigrationTaskQueryInput = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  cancelMigrationBatch: MigrationBatchSummary;
   cancelMigrationTask: MigrationTaskMutationResult;
   createDirectory: DirectoryMutationResult;
+  createMigrationBatch: CreateMigrationBatchResult;
   createMigrationTask: MigrationTaskMutationResult;
   deleteVideo: VideoMutationResult;
+  migrationBatchPreflight: MigrationBatchPreflightResult;
   migrationPreflight: MigrationPreflightResult;
   recordVideoView: VideoMutationResult;
+  retryMigrationBatch: MigrationBatchSummary;
   updateVideoMetadata: VideoMutationResult;
+};
+
+
+export type MutationCancelMigrationBatchArgs = {
+  input: MigrationBatchActionInput;
 };
 
 
@@ -172,6 +236,11 @@ export type MutationCreateDirectoryArgs = {
 };
 
 
+export type MutationCreateMigrationBatchArgs = {
+  input: CreateMigrationBatchInput;
+};
+
+
 export type MutationCreateMigrationTaskArgs = {
   input: CreateMigrationTaskInput;
 };
@@ -182,6 +251,11 @@ export type MutationDeleteVideoArgs = {
 };
 
 
+export type MutationMigrationBatchPreflightArgs = {
+  input: MigrationBatchPreflightInput;
+};
+
+
 export type MutationMigrationPreflightArgs = {
   input: MigrationPreflightInput;
 };
@@ -189,6 +263,11 @@ export type MutationMigrationPreflightArgs = {
 
 export type MutationRecordVideoViewArgs = {
   videoId: Scalars['ID']['input'];
+};
+
+
+export type MutationRetryMigrationBatchArgs = {
+  input: MigrationBatchActionInput;
 };
 
 
@@ -309,10 +388,17 @@ export type SeriesOrderEntryInput = {
   videoId: Scalars['String']['input'];
 };
 
+export type SkippedMigrationSource = {
+  __typename?: 'SkippedMigrationSource';
+  reason: Scalars['String']['output'];
+  sourceVideoId: Scalars['ID']['output'];
+};
+
 export type Subscription = {
   __typename?: 'Subscription';
   batchDeleteSubscription: BatchOperationStatus;
   batchUpdateSubscription: BatchOperationStatus;
+  migrationBatchProgress: MigrationBatchProgress;
   migrationProgressSubscription: MigrationProgressStatus;
   migrationRetrySubscription: MigrationProgressStatus;
 };
@@ -325,6 +411,11 @@ export type SubscriptionBatchDeleteSubscriptionArgs = {
 
 export type SubscriptionBatchUpdateSubscriptionArgs = {
   input: VideosBatchOperationInput;
+};
+
+
+export type SubscriptionMigrationBatchProgressArgs = {
+  input: MigrationBatchActionInput;
 };
 
 
@@ -440,7 +531,7 @@ export type CreateMigrationTaskMutationVariables = Exact<{
 }>;
 
 
-export type CreateMigrationTaskMutation = { __typename?: 'Mutation', createMigrationTask: { __typename?: 'MigrationTaskMutationResult', success: boolean, errorMessage?: string | null, task?: { __typename?: 'MigrationTask', id: string, sourcePath: string, sourceCategory: string, targetPath: string, targetCategory: string, fileName: string, fileSize: string, bytesTransferred: string, status: MigrationStatusEnum, errorMessage?: string | null, failedStep?: string | null, conflictStrategy?: string | null, renamedTargetPath?: string | null, createdAt: number, updatedAt: number, completedAt?: number | null } | null } };
+export type CreateMigrationTaskMutation = { __typename?: 'Mutation', createMigrationTask: { __typename?: 'MigrationTaskMutationResult', success: boolean, errorMessage?: string | null, task?: { __typename?: 'MigrationTask', id: string, sourcePath: string, sourceCategory: string, targetPath: string, targetCategory: string, fileName: string, fileSize: string, bytesTransferred: string, status: MigrationStatusEnum, errorMessage?: string | null, failedStep?: string | null, conflictStrategy?: string | null, renamedTargetPath?: string | null, createdAt: number, updatedAt: number, completedAt?: number | null, batchId?: string | null } | null } };
 
 export type CancelMigrationTaskMutationVariables = Exact<{
   input: MigrationTaskActionInput;
@@ -454,7 +545,7 @@ export type GetMigrationTasksQueryVariables = Exact<{
 }>;
 
 
-export type GetMigrationTasksQuery = { __typename?: 'Query', getMigrationTasks: { __typename?: 'MigrationTaskListResult', totalCount: number, page: number, pageSize: number, tasks: Array<{ __typename?: 'MigrationTask', id: string, sourcePath: string, sourceCategory: string, targetPath: string, targetCategory: string, fileName: string, fileSize: string, bytesTransferred: string, status: MigrationStatusEnum, errorMessage?: string | null, failedStep?: string | null, conflictStrategy?: string | null, renamedTargetPath?: string | null, createdAt: number, updatedAt: number, completedAt?: number | null }> } };
+export type GetMigrationTasksQuery = { __typename?: 'Query', getMigrationTasks: { __typename?: 'MigrationTaskListResult', totalCount: number, page: number, pageSize: number, tasks: Array<{ __typename?: 'MigrationTask', id: string, sourcePath: string, sourceCategory: string, targetPath: string, targetCategory: string, fileName: string, fileSize: string, bytesTransferred: string, status: MigrationStatusEnum, errorMessage?: string | null, failedStep?: string | null, conflictStrategy?: string | null, renamedTargetPath?: string | null, createdAt: number, updatedAt: number, completedAt?: number | null, batchId?: string | null }> } };
 
 export type MigrationProgressSubscriptionVariables = Exact<{
   input: MigrationTaskActionInput;
@@ -469,6 +560,41 @@ export type MigrationRetrySubscriptionVariables = Exact<{
 
 
 export type MigrationRetrySubscription = { __typename?: 'Subscription', migrationRetrySubscription: { __typename?: 'MigrationProgressStatus', taskId: string, status: MigrationStatusEnum, bytesTransferred: string, totalBytes: string, progressPercentage: number, message?: string | null } };
+
+export type MigrationBatchPreflightMutationVariables = Exact<{
+  input: MigrationBatchPreflightInput;
+}>;
+
+
+export type MigrationBatchPreflightMutation = { __typename?: 'Mutation', migrationBatchPreflight: { __typename?: 'MigrationBatchPreflightResult', valid: boolean, totalSize: string, spaceAvailable?: string | null, spaceSufficient?: boolean | null, items: Array<{ __typename?: 'MigrationBatchPreflightItem', sourceVideoId: string, result: { __typename?: 'MigrationPreflightResult', valid: boolean, sourceFileSize: string, conflictExists: boolean, alreadyMigrating: boolean, sameLocation: boolean, errorMessage?: string | null } }> } };
+
+export type CreateMigrationBatchMutationVariables = Exact<{
+  input: CreateMigrationBatchInput;
+}>;
+
+
+export type CreateMigrationBatchMutation = { __typename?: 'Mutation', createMigrationBatch: { __typename?: 'CreateMigrationBatchResult', batchId?: string | null, tasks: Array<{ __typename?: 'MigrationTask', id: string, sourcePath: string, sourceCategory: string, targetPath: string, targetCategory: string, fileName: string, fileSize: string, bytesTransferred: string, status: MigrationStatusEnum, errorMessage?: string | null, failedStep?: string | null, conflictStrategy?: string | null, renamedTargetPath?: string | null, createdAt: number, updatedAt: number, completedAt?: number | null, batchId?: string | null }>, skipped: Array<{ __typename?: 'SkippedMigrationSource', sourceVideoId: string, reason: string }> } };
+
+export type CancelMigrationBatchMutationVariables = Exact<{
+  input: MigrationBatchActionInput;
+}>;
+
+
+export type CancelMigrationBatchMutation = { __typename?: 'Mutation', cancelMigrationBatch: { __typename?: 'MigrationBatchSummary', batchId: string, total: number, active: number, completed: number, failed: number, cancelled: number } };
+
+export type RetryMigrationBatchMutationVariables = Exact<{
+  input: MigrationBatchActionInput;
+}>;
+
+
+export type RetryMigrationBatchMutation = { __typename?: 'Mutation', retryMigrationBatch: { __typename?: 'MigrationBatchSummary', batchId: string, total: number, active: number, completed: number, failed: number, cancelled: number } };
+
+export type MigrationBatchProgressSubscriptionVariables = Exact<{
+  input: MigrationBatchActionInput;
+}>;
+
+
+export type MigrationBatchProgressSubscription = { __typename?: 'Subscription', migrationBatchProgress: { __typename?: 'MigrationBatchProgress', summary?: { __typename?: 'MigrationBatchSummary', batchId: string, total: number, active: number, completed: number, failed: number, cancelled: number } | null, task?: { __typename?: 'MigrationProgressStatus', taskId: string, status: MigrationStatusEnum, bytesTransferred: string, totalBytes: string, progressPercentage: number, message?: string | null } | null } };
 
 export type UpdateVideoMetadataMutationVariables = Exact<{
   input: UpdateVideoMetadataInput;
@@ -591,7 +717,7 @@ export const MigrationPreflightDocument = {"kind":"Document","definitions":[{"ki
       super(apollo);
     }
   }
-export const CreateMigrationTaskDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateMigrationTask"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateMigrationTaskInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createMigrationTask"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"task"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}}]}}]}}]}}]} as unknown as DocumentNode;
+export const CreateMigrationTaskDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateMigrationTask"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateMigrationTaskInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createMigrationTask"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"success"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"task"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}},{"kind":"Field","name":{"kind":"Name","value":"batchId"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -615,7 +741,7 @@ export const CancelMigrationTaskDocument = {"kind":"Document","definitions":[{"k
       super(apollo);
     }
   }
-export const GetMigrationTasksDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetMigrationTasks"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskQueryInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getMigrationTasks"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}},{"kind":"Field","name":{"kind":"Name","value":"page"}},{"kind":"Field","name":{"kind":"Name","value":"pageSize"}},{"kind":"Field","name":{"kind":"Name","value":"tasks"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}}]}}]}}]}}]} as unknown as DocumentNode;
+export const GetMigrationTasksDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"GetMigrationTasks"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationTaskQueryInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"getMigrationTasks"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}},{"kind":"Field","name":{"kind":"Name","value":"page"}},{"kind":"Field","name":{"kind":"Name","value":"pageSize"}},{"kind":"Field","name":{"kind":"Name","value":"tasks"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}},{"kind":"Field","name":{"kind":"Name","value":"batchId"}}]}}]}}]}}]} as unknown as DocumentNode;
 
   @Injectable({
     providedIn: 'root'
@@ -646,6 +772,66 @@ export const MigrationRetryDocument = {"kind":"Document","definitions":[{"kind":
   })
   export class MigrationRetryGQL extends Apollo.Subscription<MigrationRetrySubscription, MigrationRetrySubscriptionVariables> {
     override document = MigrationRetryDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const MigrationBatchPreflightDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"MigrationBatchPreflight"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationBatchPreflightInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"migrationBatchPreflight"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"valid"}},{"kind":"Field","name":{"kind":"Name","value":"totalSize"}},{"kind":"Field","name":{"kind":"Name","value":"spaceAvailable"}},{"kind":"Field","name":{"kind":"Name","value":"spaceSufficient"}},{"kind":"Field","name":{"kind":"Name","value":"items"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sourceVideoId"}},{"kind":"Field","name":{"kind":"Name","value":"result"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"valid"}},{"kind":"Field","name":{"kind":"Name","value":"sourceFileSize"}},{"kind":"Field","name":{"kind":"Name","value":"conflictExists"}},{"kind":"Field","name":{"kind":"Name","value":"alreadyMigrating"}},{"kind":"Field","name":{"kind":"Name","value":"sameLocation"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}}]}}]}}]}}]}}]} as unknown as DocumentNode;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class MigrationBatchPreflightGQL extends Apollo.Mutation<MigrationBatchPreflightMutation, MigrationBatchPreflightMutationVariables> {
+    override document = MigrationBatchPreflightDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const CreateMigrationBatchDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CreateMigrationBatch"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"CreateMigrationBatchInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"createMigrationBatch"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchId"}},{"kind":"Field","name":{"kind":"Name","value":"tasks"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"sourcePath"}},{"kind":"Field","name":{"kind":"Name","value":"sourceCategory"}},{"kind":"Field","name":{"kind":"Name","value":"targetPath"}},{"kind":"Field","name":{"kind":"Name","value":"targetCategory"}},{"kind":"Field","name":{"kind":"Name","value":"fileName"}},{"kind":"Field","name":{"kind":"Name","value":"fileSize"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"errorMessage"}},{"kind":"Field","name":{"kind":"Name","value":"failedStep"}},{"kind":"Field","name":{"kind":"Name","value":"conflictStrategy"}},{"kind":"Field","name":{"kind":"Name","value":"renamedTargetPath"}},{"kind":"Field","name":{"kind":"Name","value":"createdAt"}},{"kind":"Field","name":{"kind":"Name","value":"updatedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}},{"kind":"Field","name":{"kind":"Name","value":"batchId"}}]}},{"kind":"Field","name":{"kind":"Name","value":"skipped"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"sourceVideoId"}},{"kind":"Field","name":{"kind":"Name","value":"reason"}}]}}]}}]}}]} as unknown as DocumentNode;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class CreateMigrationBatchGQL extends Apollo.Mutation<CreateMigrationBatchMutation, CreateMigrationBatchMutationVariables> {
+    override document = CreateMigrationBatchDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const CancelMigrationBatchDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"CancelMigrationBatch"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationBatchActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"cancelMigrationBatch"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchId"}},{"kind":"Field","name":{"kind":"Name","value":"total"}},{"kind":"Field","name":{"kind":"Name","value":"active"}},{"kind":"Field","name":{"kind":"Name","value":"completed"}},{"kind":"Field","name":{"kind":"Name","value":"failed"}},{"kind":"Field","name":{"kind":"Name","value":"cancelled"}}]}}]}}]} as unknown as DocumentNode;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class CancelMigrationBatchGQL extends Apollo.Mutation<CancelMigrationBatchMutation, CancelMigrationBatchMutationVariables> {
+    override document = CancelMigrationBatchDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const RetryMigrationBatchDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"mutation","name":{"kind":"Name","value":"RetryMigrationBatch"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationBatchActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"retryMigrationBatch"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchId"}},{"kind":"Field","name":{"kind":"Name","value":"total"}},{"kind":"Field","name":{"kind":"Name","value":"active"}},{"kind":"Field","name":{"kind":"Name","value":"completed"}},{"kind":"Field","name":{"kind":"Name","value":"failed"}},{"kind":"Field","name":{"kind":"Name","value":"cancelled"}}]}}]}}]} as unknown as DocumentNode;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class RetryMigrationBatchGQL extends Apollo.Mutation<RetryMigrationBatchMutation, RetryMigrationBatchMutationVariables> {
+    override document = RetryMigrationBatchDocument;
+    
+    constructor(apollo: Apollo.Apollo) {
+      super(apollo);
+    }
+  }
+export const MigrationBatchProgressDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"subscription","name":{"kind":"Name","value":"MigrationBatchProgress"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"input"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"MigrationBatchActionInput"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"migrationBatchProgress"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"input"},"value":{"kind":"Variable","name":{"kind":"Name","value":"input"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"summary"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"batchId"}},{"kind":"Field","name":{"kind":"Name","value":"total"}},{"kind":"Field","name":{"kind":"Name","value":"active"}},{"kind":"Field","name":{"kind":"Name","value":"completed"}},{"kind":"Field","name":{"kind":"Name","value":"failed"}},{"kind":"Field","name":{"kind":"Name","value":"cancelled"}}]}},{"kind":"Field","name":{"kind":"Name","value":"task"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"taskId"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"bytesTransferred"}},{"kind":"Field","name":{"kind":"Name","value":"totalBytes"}},{"kind":"Field","name":{"kind":"Name","value":"progressPercentage"}},{"kind":"Field","name":{"kind":"Name","value":"message"}}]}}]}}]}}]} as unknown as DocumentNode;
+
+  @Injectable({
+    providedIn: 'root'
+  })
+  export class MigrationBatchProgressGQL extends Apollo.Subscription<MigrationBatchProgressSubscription, MigrationBatchProgressSubscriptionVariables> {
+    override document = MigrationBatchProgressDocument;
     
     constructor(apollo: Apollo.Apollo) {
       super(apollo);

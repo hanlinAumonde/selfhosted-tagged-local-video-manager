@@ -34,6 +34,14 @@ import {
   MigrationTaskQueryInput,
   MigrationProgressGQL,
   MigrationRetryGQL,
+  MigrationBatchPreflightGQL,
+  MigrationBatchPreflightInput,
+  CreateMigrationBatchGQL,
+  CreateMigrationBatchInput,
+  CancelMigrationBatchGQL,
+  RetryMigrationBatchGQL,
+  MigrationBatchActionInput,
+  MigrationBatchProgressGQL,
 } from '../../core/graphql/generated/graphql';
 import {
   catchError,
@@ -52,10 +60,14 @@ import {
   BrowseDirectoryDetail,
   CancelMigrationTaskDetail,
   CreateDirectoryDetail,
+  CreateMigrationBatchDetail,
   CreateMigrationTaskDetail,
   DeleteVideoDetail,
   DirectoryMetadataDetail,
   GetTopTagsDetail,
+  MigrationBatchPreflightDetail,
+  MigrationBatchProgressDetail,
+  MigrationBatchSummaryDetail,
   MigrationPreflightDetail,
   MigrationProgressDetail,
   MigrationTaskListDetail,
@@ -97,6 +109,11 @@ export class GqlService {
   private getMigrationTasksGQL = inject(GetMigrationTasksGQL)
   private migrationProgressGQL = inject(MigrationProgressGQL)
   private migrationRetryGQL = inject(MigrationRetryGQL)
+  private migrationBatchPreflightGQL = inject(MigrationBatchPreflightGQL)
+  private createMigrationBatchGQL = inject(CreateMigrationBatchGQL)
+  private cancelMigrationBatchGQL = inject(CancelMigrationBatchGQL)
+  private retryMigrationBatchGQL = inject(RetryMigrationBatchGQL)
+  private migrationBatchProgressGQL = inject(MigrationBatchProgressGQL)
   private validationService = inject(ValidationService);
   private toastService = inject(ToastService);
 
@@ -441,6 +458,47 @@ export class GqlService {
     return this.toResultStateObservable(
       this.migrationRetryGQL.subscribe({ variables: { input } }),
       (data) => (data.migrationRetrySubscription ?? null) as MigrationProgressDetail | null
+    )
+  }
+
+  // -------------------------Batch migration-------------------------
+
+  migrationBatchPreflightMutation(input: MigrationBatchPreflightInput) {
+    return this.toResultStateObservable(
+      this.migrationBatchPreflightGQL.mutate({ variables: { input } }),
+      (data) => (data.migrationBatchPreflight ?? null) as MigrationBatchPreflightDetail | null,
+      false
+    )
+  }
+
+  createMigrationBatchMutation(input: CreateMigrationBatchInput) {
+    return this.toResultStateObservable(
+      this.createMigrationBatchGQL.mutate({ variables: { input } }),
+      (data) => (data.createMigrationBatch ?? null) as CreateMigrationBatchDetail | null,
+      false
+    )
+  }
+
+  cancelMigrationBatchMutation(input: MigrationBatchActionInput) {
+    return this.toResultStateObservable(
+      this.cancelMigrationBatchGQL.mutate({ variables: { input } }),
+      (data) => (data.cancelMigrationBatch ?? null) as MigrationBatchSummaryDetail | null,
+      false
+    )
+  }
+
+  retryMigrationBatchMutation(input: MigrationBatchActionInput) {
+    return this.toResultStateObservable(
+      this.retryMigrationBatchGQL.mutate({ variables: { input } }),
+      (data) => (data.retryMigrationBatch ?? null) as MigrationBatchSummaryDetail | null,
+      false
+    )
+  }
+
+  migrationBatchProgressSubscription(input: MigrationBatchActionInput) {
+    return this.toResultStateObservable(
+      this.migrationBatchProgressGQL.subscribe({ variables: { input } }),
+      (data) => (data.migrationBatchProgress ?? null) as MigrationBatchProgressDetail | null
     )
   }
 }

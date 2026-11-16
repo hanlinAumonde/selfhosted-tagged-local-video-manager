@@ -6,6 +6,8 @@ export interface MigrationTaskFilter {
   statusFilter: MigrationStatusEnum[] | null;
   page: number;
   pageSize: number;
+  /** Only the children of this batch, or null for every task. */
+  batchId: string | null;
 }
 
 export interface MigrationStatusDisplay {

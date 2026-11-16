@@ -1,6 +1,7 @@
 import { Component, inject, signal, DestroyRef, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
@@ -53,6 +54,7 @@ export class MigrationTaskList implements OnInit {
     statusFilter: null,
     page: 1,
     pageSize: 20,
+    batchId: null,
   });
 
   activeFilterIndex = signal<number>(0);
@@ -60,6 +62,7 @@ export class MigrationTaskList implements OnInit {
   /* Running tasks whose cancel was accepted but has not reached the worker yet. */
   cancelling = signal<ReadonlySet<string>>(new Set());
   activeProgress = this.migrationTracker.liveProgress;
+  batchSummaries = this.migrationTracker.batchSummaries;
 
   constructor() {
     /*
@@ -68,10 +71,12 @@ export class MigrationTaskList implements OnInit {
     */
     this.migrationTracker.onTaskSettled()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((taskId) => {
-        this.setCancelling(taskId, false);
-        this.loadTasks();
-      });
+      .subscribe((taskId) => this.setCancelling(taskId, false));
+    // A batch ends its children in bursts (a cancel settles every queued one at once),
+    // so the list is reloaded once per burst rather than once per task.
+    this.migrationTracker.onTaskSettled()
+      .pipe(debounceTime(300), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.loadTasks());
   }
 
   ngOnInit() {
@@ -84,6 +89,7 @@ export class MigrationTaskList implements OnInit {
       page: f.page,
       pageSize: f.pageSize,
       statusFilter: f.statusFilter?.map(s => s.toString()) ?? undefined,
+      batchId: f.batchId ?? undefined,
     };
 
     this.gqlService.getMigrationTasksQuery(input)
@@ -93,6 +99,8 @@ export class MigrationTaskList implements OnInit {
           this.tasks.set(result);
           if (result.data) {
             this.migrationTracker.track(result.data.tasks);
+            // Also for a batch with nothing left running: that is how its counts arrive.
+            if (f.batchId) this.migrationTracker.trackBatch(f.batchId, result.data.tasks);
           }
         },
         error: (err) => {
@@ -106,6 +114,45 @@ export class MigrationTaskList implements OnInit {
     const option = this.statusOptions[index];
     this.filter.update(f => ({ ...f, statusFilter: option.value, page: 1 }));
     this.loadTasks();
+  }
+
+  showBatch(batchId: string | null) {
+    this.filter.update(f => ({ ...f, batchId, page: 1 }));
+    this.loadTasks();
+  }
+
+  cancelBatch(batchId: string) {
+    this.gqlService.cancelMigrationBatchMutation({ batchId })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          if (!result.data) return;
+          // Queued children were settled by the request; running ones only asked to stop.
+          for (const task of this.tasks().data?.tasks ?? []) {
+            if (task.batchId === batchId && this.getLiveStatus(task) === MigrationStatusEnum.Processing) {
+              this.setCancelling(task.id, true);
+            }
+          }
+          this.toastService.emitNewToast('Cancelling the batch…', ToastType.Success);
+          this.loadTasks();
+        }
+      });
+  }
+
+  retryBatch(batchId: string) {
+    this.gqlService.retryMigrationBatchMutation({ batchId })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          if (!result.data) return;
+          this.toastService.emitNewToast('Retrying the failed files of the batch.', ToastType.Success);
+          this.loadTasks();
+        }
+      });
+  }
+
+  shortBatchId(batchId: string): string {
+    return batchId.slice(-6);
   }
 
   onPageChange(page: number) {

@@ -1,7 +1,9 @@
 import {
     BatchUpdateSubscriptionSubscription,
     BrowseDirectoryQuery,
+    CancelMigrationBatchMutation,
     CancelMigrationTaskMutation,
+    CreateMigrationBatchMutation,
     CreateDirectoryMutation,
     CreateMigrationTaskMutation,
     DeleteVideoMutation,
@@ -10,6 +12,8 @@ import {
     GetSeriesVideosQuery,
     GetTopTagsQuery,
     GetVideoByIdQuery,
+    MigrationBatchPreflightMutation,
+    MigrationBatchProgressSubscription,
     MigrationPreflightMutation,
     MigrationProgressSubscription,
     RecordVideoViewMutation,
@@ -55,3 +59,9 @@ export type CancelMigrationTaskDetail = CancelMigrationTaskMutation['cancelMigra
 export type MigrationTaskListDetail = GetMigrationTasksQuery['getMigrationTasks'];
 export type MigrationTaskItem = MigrationTaskListDetail['tasks'][0];
 export type MigrationProgressDetail = MigrationProgressSubscription['migrationProgressSubscription'];
+
+export type MigrationBatchPreflightDetail = MigrationBatchPreflightMutation['migrationBatchPreflight'];
+export type MigrationBatchPreflightItem = MigrationBatchPreflightDetail['items'][0];
+export type CreateMigrationBatchDetail = CreateMigrationBatchMutation['createMigrationBatch'];
+export type MigrationBatchSummaryDetail = CancelMigrationBatchMutation['cancelMigrationBatch'];
+export type MigrationBatchProgressDetail = MigrationBatchProgressSubscription['migrationBatchProgress'];

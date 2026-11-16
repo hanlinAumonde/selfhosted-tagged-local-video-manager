@@ -85,9 +85,7 @@ export class FileNodeMenu {
 
   openMigrationPanel(video: BrowsedVideo) {
     const data: MigrationPanelData = {
-      sourceVideoId: video.id,
-      sourceVideoName: video.name,
-      sourceFileSize: video.size,
+      videos: [{ id: video.id, name: video.name, size: video.size }],
       sourceCurrentDir: nodeDirectory(this.currentPath(), video) || '/',
     };
 

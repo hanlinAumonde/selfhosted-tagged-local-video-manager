@@ -4,6 +4,7 @@ import { GqlService } from '../GQL-service/GQL.service';
 import { VideoUpdateEventService } from '../video-update-event-service/video-update-event.service';
 import { MigrationStatusEnum, MigrationTaskQueryInput } from '../../core/graphql/generated/graphql';
 import {
+  MigrationBatchSummaryDetail,
   MigrationProgressDetail,
   MigrationTaskItem,
   ResultState,
@@ -27,7 +28,18 @@ export class MigrationTrackerService {
   private progress = signal<ReadonlyMap<string, MigrationProgressDetail>>(new Map());
   private settled$ = new Subject<string>();
 
+  /*
+    A batch is watched through one subscription for all its children: a batch can hold
+    hundreds of queued files, and a WebSocket per child would be one per file.
+  */
+  private batchSubscriptions = new Map<string, Subscription>();
+  private batchTasks = new Map<string, Map<string, MigrationTaskItem>>();
+  private batchCompleted = new Map<string, Set<string>>();
+  private summaries = signal<ReadonlyMap<string, MigrationBatchSummaryDetail>>(new Map());
+
   readonly liveProgress = this.progress.asReadonly();
+  /** batchId → the latest counts of each batch being watched. */
+  readonly batchSummaries = this.summaries.asReadonly();
 
   /** Fires with a task id each time one reaches a terminal status. */
   onTaskSettled(): Observable<string> {
@@ -37,7 +49,63 @@ export class MigrationTrackerService {
   track(tasks: MigrationTaskItem[]): void {
     for (const task of tasks) {
       if (isMigrationTerminal(task.status) || this.watched.has(task.id)) continue;
-      this.watch(task, this.gqlService.migrationProgressSubscription({ taskId: task.id }));
+      if (task.batchId) {
+        this.trackBatch(task.batchId, [task]);
+      } else {
+        this.watch(task, this.gqlService.migrationProgressSubscription({ taskId: task.id }));
+      }
+    }
+  }
+
+  /**
+   * Watch a batch until none of its children is active. `tasks` are the children this
+   * tab knows about; only their directories are refreshed when the batch ends, so pass
+   * every child that may move a file the user is looking at.
+   *
+   * Also works on a batch that has already settled: the subscription opens with its
+   * counts and ends straight away, which is how a view gets a batch's summary.
+   */
+  trackBatch(batchId: string, tasks: MigrationTaskItem[] = []): void {
+    const known = this.batchTasks.get(batchId) ?? new Map<string, MigrationTaskItem>();
+    for (const task of tasks) known.set(task.id, task);
+    this.batchTasks.set(batchId, known);
+    if (this.batchSubscriptions.has(batchId)) return;
+
+    this.batchCompleted.set(batchId, new Set());
+    const release = () => {
+      this.batchSubscriptions.delete(batchId);
+      this.batchTasks.delete(batchId);
+      this.batchCompleted.delete(batchId);
+    };
+
+    const subscription = this.gqlService.migrationBatchProgressSubscription({ batchId })
+      .subscribe({
+        next: (result) => {
+          const event = result.data;
+          if (!event) return;
+
+          const frame = event.task;
+          if (frame) {
+            this.progress.update(current => new Map(current).set(frame.taskId, frame));
+            if (isMigrationTerminal(frame.status)) {
+              if (frame.status === MigrationStatusEnum.Completed) {
+                this.batchCompleted.get(batchId)?.add(frame.taskId);
+              }
+              this.settled$.next(frame.taskId);
+            }
+          }
+
+          if (event.summary) {
+            const summary = event.summary;
+            this.summaries.update(current => new Map(current).set(batchId, summary));
+            if (summary.active === 0) this.settleBatch(batchId);
+          }
+        },
+        error: release,
+        complete: release,
+      });
+    if (!subscription.closed) {
+      this.batchSubscriptions.set(batchId, subscription);
     }
   }
 
@@ -119,6 +187,27 @@ export class MigrationTrackerService {
       });
     if (!subscription.closed) {
       this.subscriptions.set(task.id, subscription);
+    }
+  }
+
+  /*
+    The backend refreshes a batch's directory metadata once, after its last child, so
+    views are refreshed then too, once per directory pair instead of once per file.
+  */
+  private settleBatch(batchId: string): void {
+    const known = this.batchTasks.get(batchId);
+    const completed = this.batchCompleted.get(batchId);
+    if (!known || !completed?.size) return;
+
+    const pairs = new Map<string, [string, string]>();
+    for (const taskId of completed) {
+      const task = known.get(taskId);
+      if (!task) continue;
+      const pair: [string, string] = [parentDirectoryOf(task.sourcePath), parentDirectoryOf(task.targetPath)];
+      pairs.set(pair.join('\n'), pair);
+    }
+    for (const [sourceDir, targetDir] of pairs.values()) {
+      this.videoUpdateEventService.emitMigrated(sourceDir, targetDir);
     }
   }
 

@@ -16,6 +16,9 @@ import { ConflictStrategy } from '../../models/migration.model';
 import { comparatorBySortOption } from '../../models/management.model';
 import {
   BrowseDirectoryDetail,
+  CreateMigrationBatchDetail,
+  MigrationBatchPreflightDetail,
+  MigrationBatchPreflightItem,
   MigrationPreflightDetail,
   ResultState,
 } from '../../models/GQL-result.model';
@@ -44,10 +47,12 @@ export class MigrationPanel {
   private migrationTracker = inject(MigrationTrackerService);
 
   // --- Source Info ---
-  readonly sourceVideoId = this.data.sourceVideoId;
-  readonly sourceVideoName = this.data.sourceVideoName;
-  readonly sourceFileSize = this.data.sourceFileSize;
+  readonly videos = this.data.videos;
+  readonly isBatch = this.videos.length > 1;
+  readonly sourceVideoName = this.isBatch ? `${this.videos.length} videos` : this.videos[0].name;
+  readonly sourceFileSize = this.videos.reduce((sum, video) => sum + video.size, 0);
   readonly sourceCurrentDir = this.data.sourceCurrentDir;
+  private readonly nameById = new Map(this.videos.map(video => [video.id, video.name]));
 
   // --- Step Management ---
   currentStep = signal<Step>('select');
@@ -72,8 +77,21 @@ export class MigrationPanel {
 
   // --- Step 2: Preflight Results ---
   preflightResult = signal<MigrationPreflightDetail | null>(null);
+  batchPreflight = signal<MigrationBatchPreflightDetail | null>(null);
   preflightLoading = signal(false);
   conflictStrategy = signal<ConflictStrategy | null>(null);
+
+  /*
+    A batch only sends the files that passed. A file failing a check (already migrating,
+    or already in the target) would otherwise be created anyway: creation does not
+    repeat those checks, which is why the single-file flow blocks on them too.
+  */
+  readonly batchReady = computed(() =>
+    this.batchPreflight()?.items.filter(item => item.result.valid && !item.result.conflictExists) ?? []);
+  readonly batchConflicts = computed(() =>
+    this.batchPreflight()?.items.filter(item => item.result.valid && item.result.conflictExists) ?? []);
+  readonly batchExcluded = computed(() =>
+    this.batchPreflight()?.items.filter(item => !item.result.valid) ?? []);
 
   constructor() {
     this.browseTargetDirectory([]);
@@ -125,8 +143,12 @@ export class MigrationPanel {
     if (!targetDir) return;
 
     this.preflightLoading.set(true);
+    if (this.isBatch) {
+      this.runBatchPreflight(targetDir);
+      return;
+    }
     this.gqlService.migrationPreflightMutation({
-      sourceVideoId: this.sourceVideoId,
+      sourceVideoId: this.videos[0].id,
       targetDirRelativePath: { relativePath: targetDir },
     })
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -147,14 +169,41 @@ export class MigrationPanel {
       });
   }
 
+  private runBatchPreflight(targetDir: string) {
+    this.gqlService.migrationBatchPreflightMutation({
+      sourceVideoIds: this.videos.map(video => video.id),
+      targetDirRelativePath: { relativePath: targetDir },
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.preflightLoading.set(false);
+          if (result.data) {
+            this.batchPreflight.set(result.data);
+            this.currentStep.set('preflight');
+            if (this.batchConflicts().length > 0) {
+              this.conflictStrategy.set('rename');
+            }
+          }
+        },
+        error: () => {
+          this.preflightLoading.set(false);
+        }
+      });
+  }
+
   // ─── Start Migration ───────────────────────────────────────────────
 
   startMigration() {
     const targetDir = this.selectedTargetDir();
     if (!targetDir) return;
+    if (this.isBatch) {
+      this.startBatchMigration(targetDir);
+      return;
+    }
 
     const input = {
-      sourceVideoId: this.sourceVideoId,
+      sourceVideoId: this.videos[0].id,
       targetDirRelativePath: { relativePath: targetDir },
       conflictStrategy: this.conflictStrategy() ?? undefined,
     };
@@ -179,11 +228,54 @@ export class MigrationPanel {
       });
   }
 
+  private startBatchMigration(targetDir: string) {
+    const strategy = this.batchConflicts().length > 0 ? this.conflictStrategy() : null;
+    const sent = strategy === 'skip' ? this.batchReady() : [...this.batchReady(), ...this.batchConflicts()];
+
+    this.gqlService.createMigrationBatchMutation({
+      sourceVideoIds: sent.map(item => item.sourceVideoId),
+      targetDirRelativePath: { relativePath: targetDir },
+      conflictStrategy: strategy ?? undefined,
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          if (!result.data) return;
+          this.reportBatchCreation(result.data);
+          if (result.data.batchId) {
+            this.migrationTracker.trackBatch(result.data.batchId, result.data.tasks);
+            this.dialogRef.close(true);
+          }
+        }
+      });
+  }
+
+  private reportBatchCreation(creation: CreateMigrationBatchDetail) {
+    const skipped = creation.skipped
+      .map(skip => `${this.nameOf(skip.sourceVideoId)}: ${skip.reason}`)
+      .join('; ');
+
+    if (!creation.batchId) {
+      this.toastService.emitNewToast(`No migration task was created. ${skipped}`, ToastType.Error);
+    } else if (skipped) {
+      this.toastService.emitNewToast(
+        `${creation.tasks.length} migration tasks created, ${creation.skipped.length} skipped. ${skipped}`,
+        ToastType.Warning
+      );
+    } else {
+      this.toastService.emitNewToast(
+        `${creation.tasks.length} migration tasks created. You can view their progress in the task management panel.`,
+        ToastType.Success
+      );
+    }
+  }
+
   // ─── Navigation ────────────────────────────────────────────────────
 
   goBackToSelect() {
     this.currentStep.set('select');
     this.preflightResult.set(null);
+    this.batchPreflight.set(null);
     this.conflictStrategy.set(null);
   }
 
@@ -202,12 +294,33 @@ export class MigrationPanel {
     return parseFloat((n / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
+  nameOf(videoId: string): string {
+    return this.nameById.get(videoId) ?? videoId;
+  }
+
+  /** Why a file is left out of the batch, for the list of excluded files. */
+  exclusionReason(item: MigrationBatchPreflightItem): string {
+    if (item.result.sameLocation) return 'already in the target directory';
+    if (item.result.alreadyMigrating) return 'already being migrated';
+    return item.result.errorMessage ?? 'failed the checks';
+  }
+
   canProceedPreflight(): boolean {
+    if (this.isBatch) return this.canProceedBatch();
     const result = this.preflightResult();
     if (!result) return false;
     if (!result.valid && !result.conflictExists) return false;
     if (result.conflictExists && !this.conflictStrategy()) return false;
     if (result.conflictExists && this.conflictStrategy() === 'skip') return false;
     return true;
+  }
+
+  private canProceedBatch(): boolean {
+    const preflight = this.batchPreflight();
+    if (!preflight || preflight.spaceSufficient === false) return false;
+    if (this.batchConflicts().length === 0) return this.batchReady().length > 0;
+    const strategy = this.conflictStrategy();
+    if (!strategy) return false;
+    return strategy !== 'skip' || this.batchReady().length > 0;
   }
 }

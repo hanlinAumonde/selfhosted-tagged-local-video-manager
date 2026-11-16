@@ -9,6 +9,8 @@ export interface BatchPanelVideoItem {
   name: string;
   seriesName?: string | null;
   seriesOrder?: number | null;
+  /** File size in bytes; only the file browser's selection fills it, for the migration panel. */
+  size?: number;
 }
 
 export interface BatchPanelData {
@@ -98,9 +100,14 @@ export interface DirectorySearchCriteria {
   tags: string[];
 }
 
+export interface MigrationSourceVideo {
+  id: string;
+  name: string;
+  size: number;
+}
+
+/** One video is a single migration; more than one become a batch. */
 export interface MigrationPanelData {
-  sourceVideoId: string;
-  sourceVideoName: string;
-  sourceFileSize: number;
+  videos: MigrationSourceVideo[];
   sourceCurrentDir: string;
 }

@@ -48,6 +48,7 @@
     [viewMode]="viewMode()"
     (navigateToPath)="navigateToPath($event)"
     (createFolderResult)="$event && refreshDirectory()"
+    (migrationResult)="$event && refreshDirectory()"
     (searchRequested)="runSearch($event)"
     (exitSearch)="exitSearch()"
     (viewModeToggle)="toggleViewMode()"

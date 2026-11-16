@@ -17,6 +17,41 @@
     </button>
   </div>
 
+  <!-- Batch Filter: counts and the actions on the whole batch -->
+  @if (filter().batchId; as batchId) {
+    <div class="flex items-center justify-between gap-2 mb-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex-wrap">
+      <div class="flex items-center gap-2 text-sm flex-wrap">
+        <mat-icon fontIcon="inventory_2" class="text-blue-500"></mat-icon>
+        <span class="font-medium">Batch #{{ shortBatchId(batchId) }}</span>
+        @if (batchSummaries().get(batchId); as summary) {
+          <span class="text-gray-600 dark:text-gray-300">
+            {{ summary.total }} files · {{ summary.active }} active · {{ summary.completed }} completed ·
+            {{ summary.failed }} failed · {{ summary.cancelled }} cancelled
+          </span>
+        }
+      </div>
+      <div class="flex items-center gap-2">
+        @if (batchSummaries().get(batchId); as summary) {
+          @if (summary.active > 0) {
+            <button mat-stroked-button class="text-sm!" (click)="cancelBatch(batchId)">
+              <mat-icon fontIcon="cancel" class="text-base!"></mat-icon>
+              Cancel batch
+            </button>
+          }
+          @if (summary.failed > 0) {
+            <button mat-stroked-button class="text-sm!" (click)="retryBatch(batchId)">
+              <mat-icon fontIcon="replay" class="text-base!"></mat-icon>
+              Retry failed
+            </button>
+          }
+        }
+        <button mat-icon-button (click)="showBatch(null)" matTooltip="Show all batches">
+          <mat-icon fontIcon="close"></mat-icon>
+        </button>
+      </div>
+    </div>
+  }
+
   <!-- Loading State -->
   @if (tasks().loading) {
     <div class="flex flex-col items-center justify-center py-16">
@@ -51,6 +86,16 @@
             <div class="flex items-center gap-2 min-w-0 flex-1">
               <mat-icon class="shrink-0 text-gray-500" fontIcon="description"></mat-icon>
               <span class="font-medium truncate" [matTooltip]="task.fileName">{{ task.fileName }}</span>
+              @if (task.batchId && !filter().batchId) {
+                <button
+                  class="shrink-0 px-2 py-0.5 text-xs rounded-full cursor-pointer border-none
+                         bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200"
+                  (click)="showBatch(task.batchId)"
+                  matTooltip="Show this batch"
+                >
+                  Batch #{{ shortBatchId(task.batchId) }}
+                </button>
+              }
             </div>
             <div class="flex items-center gap-1 shrink-0 ml-2">
               <mat-icon
