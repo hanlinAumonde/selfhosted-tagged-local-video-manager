@@ -19,7 +19,7 @@
 
 Video App 是一个用于管理、浏览和播放自有视频库的全栈应用。在配置中把已有的目录或 S3 bucket 映射进来，它会自动扫描、生成缩略图，并通过 Web 界面管理视频元数据——标题、作者、标签、系列、收藏。
 
-存储位于策略接口之后，所以本地磁盘和 S3 兼容存储（MinIO、RustFS 等）在浏览、播放、迁移上的行为完全一致。文件迁移这类长耗时工作跑在进程级 worker 池里，与客户端连接彻底解耦：关掉标签页不会中断任务，进程重启时未完成的任务会从中断的那个阶段继续，而不是从头再来。
+存储位于策略接口之后，所以本地磁盘和 S3 兼容存储（MinIO、RustFS 等）在浏览、播放、迁移上的行为完全一致。文件迁移这类长耗时工作跑在独立的 worker 进程里，经由 Redis Stream 队列投递，与客户端连接彻底解耦：关掉标签页、重启 web 后端都不会中断任务，worker 重启时未完成的任务会从中断的那个阶段继续，而不是从头再来。
 
 ## 系统架构
 
@@ -113,7 +113,9 @@ platform/              storage · media · cache · jobs（可复用内核，不
 
 - **迁移预检**：源文件存在性、剩余空间、命名冲突、活跃任务、同位置检测，冲突时提供 `rename` / `overwrite` / `skip` 三种策略。
 - **三阶段状态机**：复制 → 改数据库记录 → 清理源文件，配一张崩溃恢复矩阵，进程重启后从中断的那个阶段继续，而不是一律从头开始。
-- **任务活得比连接长**：迁移跑在由 `tasks.max_concurrent` 决定大小的 worker 池里。订阅不启动任务、退订不终止任务，所以刷新页面、多标签页同时观察都安全。
+- **同一存储内不做多余的复制**：同一本地文件系统内的移动是一次硬链接（不支持硬链接时改用 rename），同一 S3 bucket 内的移动由服务端分片拷贝（UploadPartCopy），字节不经过 worker。其余情况（跨分类、跨 bucket、跨卷）走流式复制。
+- **任务活得比连接和重启长**：迁移跑在自己的 worker 进程里（Taskiq + Redis Stream），web 进程只负责投递，并通过 Redis Pub/Sub 转发进度。订阅不启动任务、退订不终止任务，所以刷新页面、多标签页同时观察、重启后端都安全。
+- **按设备限流**：`tasks.max_concurrent` 限制总复制数，`tasks.slots_per_device` 限制每块盘或每个 bucket 上的复制数，两路复制不会在同一块机械硬盘上来回寻道，不同设备之间的复制照常并行。
 - **迁移锁会传播**：每个返回视频的查询都会用一次批量查找填充 `isLocked`，前端据此禁用所有入口。后端各 mutation 另有独立校验，绕过 UI 直接发请求同样会被拒绝。
 
 ### 存储抽象
@@ -188,7 +190,15 @@ uv sync
 uv run main.py
 ```
 
-后端服务启动于 `http://localhost:12000`。
+后端服务启动于 `http://localhost:12000`。即使缓存用的是 `cachetools`，任务队列也需要 Redis（`REDIS_URL`）。
+
+**迁移 worker**（另开一个终端；不启动它，迁移会一直排队）：
+
+```bash
+uv run taskiq worker src.worker:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
+```
+
+只能跑一个 worker 进程（`--workers 1`）：它启动时会把所有未完成的迁移当作自己留下的孤儿来恢复。
 
 **前端：**
 
@@ -216,7 +226,7 @@ npm start
 
 ## Docker 快速部署
 
-Docker Compose 编排了 4 个服务：Angular 前端（Nginx）、FastAPI 后端、MongoDB、以及作为 S3 兼容存储的 RustFS。数据通过 bind mount 持久化，`docker-compose down` 不会丢失。
+Docker Compose 编排了 Angular 前端（Nginx）、FastAPI 后端、迁移 worker、MongoDB、Redis，以及作为 S3 兼容存储的 RustFS。后端和 worker 共用一个镜像和一段配置（YAML 锚点），挂载点只需声明一次。数据通过 bind mount 持久化，`docker-compose down` 不会丢失。
 
 ### 1. 前置准备
 
@@ -258,6 +268,9 @@ docker-compose ps
 # 查看后端日志
 docker-compose logs -f backend
 
+# 迁移 worker 日志
+docker-compose logs -f worker-migration
+
 # 拉取新代码后重新构建部署
 docker-compose up -d --build
 
@@ -283,11 +296,12 @@ video-app/
 ├── config.yaml                      # 全局配置（envyaml 语法，取值来自 .env）
 ├── .env.example                     # 全部环境变量及说明，复制为 .env 使用
 ├── Dockerfile                       # 后端镜像构建
-├── docker-compose.yml               # 前端 + 后端 + MongoDB + Redis + RustFS
+├── docker-compose.yml               # 前端 + 后端 + 迁移 worker + MongoDB + Redis + RustFS
 ├── pyproject.toml                   # 项目依赖与元数据
 │
 ├── src/
-│   ├── app.py                       # 应用工厂：日志、Mongo、TaskRunner 启动、CORS、路由
+│   ├── app.py                       # 应用工厂：日志、Mongo、任务队列 + 进度总线、CORS、路由
+│   ├── worker.py                    # 迁移 worker 的组装根（taskiq 入口：create_broker）
 │   ├── config.py                    # Settings（Pydantic + envyaml）、handler 配置 union
 │   ├── context.py                   # 依赖注入容器：13 个服务 + 路径锁注册表
 │   ├── errors.py                    # 自定义异常
@@ -311,7 +325,8 @@ video-app/
 │   │       ├── task_model.py        # TaskStatus + BaseTaskModel（进度走访问器）
 │   │       ├── progress.py          # ProgressFrame —— 单位无关的 current/total
 │   │       ├── state_machine.py     # TaskStateMachine[TTask] —— 三阶段、崩溃恢复
-│   │       ├── task_runner.py       # FIFO 队列、worker 池、进度广播
+│   │       ├── dispatch.py          # 每条队列一个 Redis Stream broker；投递、对账、恢复
+│   │       ├── progress_bus.py      # Redis Pub/Sub：worker 发布，web 扇出给观察者
 │   │       └── path_locks.py        # PathLockRegistry —— 「这个路径被占着吗」
 │   │
 │   ├── features/                    # ── 按业务能力切分 ──
@@ -347,7 +362,7 @@ video-app/
 │   ├── conftest.py                  # test_settings、MongoDB、文档 factory
 │   ├── unit/                        # 目录结构镜像 src/
 │   │   ├── test_architecture.py     # 依赖方向守卫（AST 扫描）
-│   │   ├── test_context_wiring.py · test_task_runner_bootstrap.py
+│   │   ├── test_context_wiring.py · test_worker.py
 │   │   ├── platform/                # cache · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
 │   │   └── schema/                  # Pydantic 输入契约
@@ -388,7 +403,7 @@ video-app/
             └── environments/
 ```
 
-> **新增一种后台任务类型**：继承 `BaseTaskModel`（在子类上声明自己的 `Settings.name`）和 `TaskStateMachine[YourModel]`，实现三个阶段，再用 `TaskRunner.register_executor(key, executor)` 注册。调度器一行不用改——有一个测试真的定义了第二种非迁移任务类型来证明这一点。
+> **新增一种后台任务类型**：继承 `BaseTaskModel`（在子类上声明自己的 `Settings.name`）和 `TaskStateMachine[YourModel]`，实现三个阶段，再在 `dispatch.Queue` 里给它一条队列，并仿照 `src/worker.py` 写一个 worker 组装根。模板和 dispatcher 一行不用改——测试真的用第二种非迁移任务类型跑通了两者。
 
 > **新增一种存储后端**：在 handler 上声明 `storage_type`、实现 `from_config(spec)`、加进 `_HANDLER_TYPES`，再往 `HandlerConfig` union 里加一个分类配置模型。`_create_handler` 不变，两条守卫测试把这两处登记互相钉死。
 
@@ -470,10 +485,19 @@ validation:
   series_name_max_length: 100
 
 tasks:
-  max_concurrent: 2              # 同时运行的任务数，也就是 worker 池大小。迁移是 IO 密集的，
-                                 # 调高主要让它们互相抢带宽。
-  progress_flush_interval: 3.0   # 进度落库的间隔（秒）。实时进度保存在内存里，所以这个值只
-                                 # 决定「没有活跃订阅的客户端看到的任务列表有多旧」。
+  redis_url: $REDIS_URL|redis://localhost:6379/0
+                                 # web 进程与 worker 之间的任务队列和进度帧。
+  max_concurrent: 4              # 所有设备合计同时复制的迁移数。
+  slots_per_device:              # 单个设备上同时复制的数量，按存储类型。同一块机械硬盘上
+    local_fs: 1                  # 并发复制，总吞吐反而不如一路。
+    s3: 2
+  devices: {}                    # "<category>/<pseudo_name>": 设备名。同一块物理盘上的挂载点
+                                 # 必须声明相同的名字，否则会被当成两块盘分别限流。
+  device_limits: {}              # 设备名: 同时复制数，优先于 slots_per_device。例如在 devices 里
+                                 # 把固态盘声明为 ssd-1，再写 "ssd-1: 4"。
+  progress_flush_interval: 1.0   # 进度落库的间隔（秒），也是取消请求到达运行中任务的最长延迟。
+  observe_watchdog_interval: 10.0  # 订阅多少秒没收到帧就去查一次 DB（worker 崩溃时不会发结束帧）。
+  reconcile_interval: 300.0      # 重新投递「消息可能随 Redis 丢失」的 PENDING 任务的间隔（秒）。
 
 logging:
   log_dir: logs
