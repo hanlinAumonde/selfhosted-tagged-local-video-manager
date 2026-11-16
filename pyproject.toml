@@ -21,6 +21,8 @@ dependencies = [
     "botocore==1.43.108",
     "envyaml==1.10.211231",
     "redis==8.1.0",
+    "taskiq==0.13.0",
+    "taskiq-redis==1.2.4",
 ]
 
 [tool.pytest.ini_options]

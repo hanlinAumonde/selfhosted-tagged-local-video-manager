@@ -12,6 +12,7 @@ from src import context
 from src.config import Settings
 from src.context import (
     get_catalog_service, get_browse_file_service, get_path_lock_registry,
+    get_thumbnail_service,
 )
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.task_model import TaskStatus
@@ -26,6 +27,7 @@ def fresh_singletons(monkeypatch):
     """Each test resolves the wiring from scratch, as a new process would."""
     monkeypatch.setattr(context, "_path_lock_registry", None)
     monkeypatch.setattr(context, "_migration_service", None)
+    monkeypatch.setattr(context, "_thumbnail_service", None)
 
 
 @pytest.fixture
@@ -77,6 +79,22 @@ def test_the_registry_is_the_same_instance_on_every_request(
         local_resource_handler_service, dir_metadata_service_for_context, fs_settings
     )
 
+    assert first is second
+
+
+def test_the_thumbnail_service_is_the_same_instance_on_every_request(
+    fs_settings, local_resource_handler_service,
+):
+    """Its storage breaker remembers an outage across requests; a fresh service per
+    request would forget it and wait out the storage timeouts every time."""
+    # Given a fresh composition root
+    ffmpeg = FFmpegService(semaphore_limit=1)
+
+    # When the thumbnail service is resolved for two separate requests
+    first = get_thumbnail_service(local_resource_handler_service, ffmpeg, fs_settings)
+    second = get_thumbnail_service(local_resource_handler_service, ffmpeg, fs_settings)
+
+    # Then both requests receive the same instance
     assert first is second
 
 

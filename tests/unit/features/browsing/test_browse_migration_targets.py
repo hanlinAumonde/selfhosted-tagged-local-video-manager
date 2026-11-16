@@ -4,7 +4,7 @@ Browsing a directory that an active migration is writing into.
 A migration copies bytes to its target path long before the catalog record moves
 there. Browsing that directory meanwhile used to hand the half-written file to
 the normal "new file on disk" path, which inserted a document at the target path;
-the migration then reached UPDATING_DB, tried to move its own record onto that
+the migration then reached COMMITTING, tried to move its own record onto that
 same path, and hit the unique index on `path` with a DuplicateKeyError.
 
 The rule under test: a file on disk that has no catalog document and is held by
@@ -123,14 +123,14 @@ async def test_target_is_listed_and_locked_once_the_record_moved(
 ):
     handler = local_resource_handler_service.get_handler("Test-category")
     target_db_path = _db_path(handler, local_resource_dir / "movie_a.mp4")
-    # UPDATING_DB has already run: the record now sits at the target path.
+    # COMMITTING has already run: the record now sits at the target path.
     await video_factory(name="movie_a", path=target_db_path)
     await task_factory(
         source_path="Other-category/Other-resource/movie_a.mp4",
         source_category="Other-category",
         target_path=target_db_path,
         target_category="Test-category",
-        status=TaskStatus.DB_UPDATED,
+        status=TaskStatus.COMMITTED,
     )
 
     nodes = await browse_svc.get_node_list_in_directory(_abs_path(handler, local_resource_dir))

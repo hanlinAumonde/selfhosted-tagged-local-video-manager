@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from enum import Enum
 import strawberry
 from typing import Annotated
 from fastapi import Depends
+from redis.asyncio import Redis
 from src.config import Settings, get_settings
 
 from src.config import Settings
@@ -11,9 +13,12 @@ from src.features.catalog.catalog_service import CatalogService
 from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
+from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.dispatch import Queue, TaskDispatcher, open_dispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
-from src.platform.jobs.task_runner import TaskRunner
+from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
@@ -33,7 +38,10 @@ class ContextEnum(Enum):
     CATALOG_SERVICE = CatalogService
     BATCH_OPERATION_SERVICE = BatchOperationService
     MIGRATION_SERVICE = MigrationService
-    TASK_RUNNER = TaskRunner
+    MIGRATION_BATCH_SERVICE = MigrationBatchService
+    MIGRATION_DISPATCHER = TaskDispatcher
+    PROGRESS_BUS = ProgressBus
+    PROGRESS_PUBLISHER = ProgressPublisher
 
 _cache_service: CacheService | None = None
 _resource_handler_service: ResourceHandlerService | None = None
@@ -41,8 +49,9 @@ _ffmpeg_service: FFmpegService | None = None
 _tag_operation_service: TagOperationService | None = None
 _series_service: SeriesService | None = None
 _migration_service: MigrationService | None = None
-_task_runner: TaskRunner | None = None
+_task_infrastructure: "TaskInfrastructure | None" = None
 _path_lock_registry: PathLockRegistry | None = None
+_thumbnail_service: ThumbnailService | None = None
 
 def get_cache_service(settings: Settings = Depends(get_settings)) -> CacheService | None:
     global _cache_service
@@ -86,18 +95,21 @@ def get_dir_metadata_service(
         resource_handler_service=resource_handler_service, 
         cache_service=cache_service
     )
-# DirMetadataServiceDep = Annotated[DirMetadataService, Depends(get_dir_metadata_service)]
 
 def get_thumbnail_service(
-    resource_handler_service = Depends(get_resource_handler_service), 
+    resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg = Depends(get_ffmpeg_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
 ) -> ThumbnailService | None:
-    return ThumbnailService(
-        settings=settings,
-        resource_handler_service=resource_handler_service, 
-        ffmpeg_service=ffmpeg
-    )
+    # One per process: its storage breaker has to remember an outage across requests.
+    global _thumbnail_service
+    if _thumbnail_service is None:
+        _thumbnail_service = ThumbnailService(
+            settings=settings,
+            resource_handler_service=resource_handler_service,
+            ffmpeg_service=ffmpeg,
+        )
+    return _thumbnail_service
 ThumbnailServiceDep = Annotated[ThumbnailService, Depends(get_thumbnail_service)]
 
 def get_path_lock_registry(
@@ -193,34 +205,73 @@ def get_migration_service(
         )
     return _migration_service
 
-def get_task_runner(settings: Settings = Depends(get_settings)) -> TaskRunner | None:
-    global _task_runner
-    if _task_runner is None:
-        _task_runner = TaskRunner(max_concurrent=settings.tasks.max_concurrent)
-    return _task_runner
+def get_migration_batch_service(
+    migration_service=Depends(get_migration_service),
+) -> MigrationBatchService:
+    return MigrationBatchService(migration_service)
 
-async def init_task_runner() -> TaskRunner:
+@dataclass
+class TaskInfrastructure:
     """
-    Build the runner and its executors eagerly at startup. Called from the app lifespan,
-    where the Depends() machinery is not available, so the dependency chain is resolved
-    by hand — the module-level singletons make later request-scoped lookups return these
-    same instances.
+    What the web process needs to hand work to the workers and watch it progress.
+
+    The web process runs no tasks. It puts task ids on the workers' queues and relays the
+    progress frames the workers publish to the clients watching. It publishes a frame of
+    its own only when it settles a task itself — a cancel of a task no worker has started.
     """
+
+    redis: Redis
+    migration_dispatcher: TaskDispatcher
+    progress_bus: ProgressBus
+    progress_publisher: ProgressPublisher
+
+    async def shutdown(self) -> None:
+        await self.progress_bus.stop()
+        await self.migration_dispatcher.close()
+        await self.redis.aclose()
+
+
+async def init_task_infrastructure() -> TaskInfrastructure:
+    """
+    Connect the web process to the task queues and the progress channels. Called from the
+    app lifespan, where Depends() is unavailable.
+    """
+    global _task_infrastructure
     settings = get_settings()
-    resource_handler_service = get_resource_handler_service(settings)
-    cache_service = get_cache_service(settings)
-    dir_metadata_service = get_dir_metadata_service(
-        settings, resource_handler_service, cache_service
-    )
-    migration_service = get_migration_service(
-        resource_handler_service, dir_metadata_service, settings, get_series_service()
-    )
+    prefix = settings.cache_config.key_prefix
 
-    runner = get_task_runner(settings)
-    runner.register_executor(MIGRATION_EXECUTOR_KEY, migration_service)
-    runner.start()
-    await runner.recover()
-    return runner
+    redis = Redis.from_url(settings.tasks.redis_url, decode_responses=True)
+    dispatcher = await open_dispatcher(
+        Queue.MIGRATION, settings.tasks.redis_url, prefix, MigrationTaskModel
+    )
+    bus = ProgressBus(redis, prefix, watchdog_interval=settings.tasks.observe_watchdog_interval)
+    await bus.start()
+
+    _task_infrastructure = TaskInfrastructure(
+        redis=redis,
+        migration_dispatcher=dispatcher,
+        progress_bus=bus,
+        progress_publisher=ProgressPublisher(redis, prefix),
+    )
+    return _task_infrastructure
+
+
+def _require_task_infrastructure() -> TaskInfrastructure:
+    if _task_infrastructure is None:
+        raise RuntimeError("Task infrastructure is not running; init_task_infrastructure() was not called")
+    return _task_infrastructure
+
+
+def get_migration_dispatcher() -> TaskDispatcher:
+    return _require_task_infrastructure().migration_dispatcher
+
+
+def get_progress_bus() -> ProgressBus:
+    return _require_task_infrastructure().progress_bus
+
+
+def get_progress_publisher() -> ProgressPublisher:
+    return _require_task_infrastructure().progress_publisher
 
 def get_video_stream_service(
     resource_handler_service = Depends(get_resource_handler_service),
@@ -245,7 +296,10 @@ async def get_context(
     batch_operation_service: BatchOperationService = Depends(get_batch_operation_service),
     catalog_service: CatalogService = Depends(get_catalog_service),
     migration_service: MigrationService = Depends(get_migration_service),
-    task_runner: TaskRunner = Depends(get_task_runner),
+    migration_batch_service: MigrationBatchService = Depends(get_migration_batch_service),
+    migration_dispatcher: TaskDispatcher = Depends(get_migration_dispatcher),
+    progress_bus: ProgressBus = Depends(get_progress_bus),
+    progress_publisher: ProgressPublisher = Depends(get_progress_publisher),
 ):
     return {
         ContextEnum.SETTINGS: settings,
@@ -260,7 +314,10 @@ async def get_context(
         ContextEnum.BATCH_OPERATION_SERVICE: batch_operation_service,
         ContextEnum.CATALOG_SERVICE: catalog_service,
         ContextEnum.MIGRATION_SERVICE: migration_service,
-        ContextEnum.TASK_RUNNER: task_runner,
+        ContextEnum.MIGRATION_BATCH_SERVICE: migration_batch_service,
+        ContextEnum.MIGRATION_DISPATCHER: migration_dispatcher,
+        ContextEnum.PROGRESS_BUS: progress_bus,
+        ContextEnum.PROGRESS_PUBLISHER: progress_publisher,
     }
 
 def get_context_value(info: strawberry.Info, key: ContextEnum):

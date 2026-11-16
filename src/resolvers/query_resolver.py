@@ -1,10 +1,10 @@
 import strawberry
-from bson import ObjectId
 
 from src.config import Settings
 from src.context import ContextEnum, get_context_value
-from src.errors import DatabaseOperationError, InputValidationError
+from src.errors import DatabaseOperationError
 from src.logger import get_logger
+from src.resolvers.utils import series_positions, to_browse_nodes, validate_input
 from src.schema.types.fileBrowse_type import (
     FileBrowseNode,
     RelativePathInput,
@@ -19,17 +19,11 @@ from src.schema.types.search_type import (
     Pagination
 )
 from src.schema.types.video_type import Video, VideoTag
-from src.features.browsing.browse_file_service import (
-    BrowseEntry,
-    BrowseFileService,
-    DirectoryEntry,
-    DirectorySearchCriteria,
-    VideoEntry,
-)
+from src.features.browsing.browse_file_service import BrowseFileService, DirectorySearchCriteria
 from src.features.catalog.catalog_service import CatalogService, VideoSearchCriteria
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.storage.absolute_path import AbsolutePath
-from src.features.catalog.series_service import SeriesPlacement, SeriesService
+from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
 
 logger = get_logger("query_resolver")
@@ -45,11 +39,7 @@ async def resolve_search_videos(input: VideoSearchInput, info: strawberry.Info) 
     :return: Search results for videos.
     :rtype: VideoSearchResult
     """
-    try:
-        validated_input = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="VideoSearchInput", issue="Invalid input data for video search")
+    validated_input = validate_input(input, logger, "VideoSearchInput")
 
     settings: Settings = get_context_value(info, ContextEnum.SETTINGS)
     catalogService: CatalogService = get_context_value(info, ContextEnum.CATALOG_SERVICE)
@@ -70,7 +60,7 @@ async def resolve_search_videos(input: VideoSearchInput, info: strawberry.Info) 
         )
     )
 
-    positions = await _series_positions(info, page.videos)
+    positions = await series_positions(info, page.videos)
     return VideoSearchResult(
         pagination=Pagination(
             size=page.page_size,
@@ -114,11 +104,7 @@ async def resolve_get_suggestions(input: SuggestionInput, info: strawberry.Info)
     :return: Suggestion results.
     :rtype: SuggestionResults
     """
-    try:             
-        validated_input = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="SuggestionInput", issue="Invalid input data for suggestions")
+    validated_input = validate_input(input, logger, "SuggestionInput")
 
     if not validated_input.keyword.keyWord:
         return []
@@ -143,7 +129,7 @@ async def resolve_get_video_by_id(videoId: strawberry.ID, info: strawberry.Info)
 
     # Returned rather than refused: the player page needs the metadata in order to show
     # why playback is unavailable.
-    positions = await _series_positions(info, [video_model])
+    positions = await series_positions(info, [video_model])
     return await Video.from_mongoDB(
         video_model,
         isLocked=await catalogService.is_locked(video_model.path),
@@ -161,23 +147,19 @@ async def resolve_browse_directory(input: RelativePathInput, info: strawberry.In
     :return: List of file browse nodes in the specified directory.
     :rtype: list[FileBrowseNode]
     """
-    try:
-        relativePathInputModel = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="RelativePathInput", issue="Invalid input data for directory browsing")
+    validated_input = validate_input(input, logger, "RelativePathInput")
 
     browseFileService: BrowseFileService = get_context_value(info, ContextEnum.BROWSE_FILE_SERVICE)
     entries = await browseFileService.get_node_list_in_directory(
         AbsolutePath.from_relative_path(
-            parsedPath=relativePathInputModel.parsedPath,
+            parsedPath=validated_input.parsedPath,
             handlerService=get_context_value(info, ContextEnum.RESOURCE_HANDLER_SERVICE),
             settings=get_context_value(info, ContextEnum.SETTINGS)
         ),
-        skipCache=relativePathInputModel.skipCache,
-        recursiveCalculation=relativePathInputModel.recursiveCalculation
+        skipCache=validated_input.skipCache,
+        recursiveCalculation=validated_input.recursiveCalculation
     )
-    return await _to_browse_nodes(entries, info)
+    return await to_browse_nodes(entries, info)
 
 
 async def resolve_search_in_directory(input: SearchInDirectoryInput, info: strawberry.Info) -> list[FileBrowseNode]:
@@ -196,11 +178,7 @@ async def resolve_search_in_directory(input: SearchInDirectoryInput, info: straw
     :return: List of file browse nodes matching the search.
     :rtype: list[FileBrowseNode]
     """
-    try:
-        validated_input = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="SearchInDirectoryInput", issue="Invalid input data for directory search")
+    validated_input = validate_input(input, logger, "SearchInDirectoryInput")
 
     browseFileService: BrowseFileService = get_context_value(info, ContextEnum.BROWSE_FILE_SERVICE)
     entries = await browseFileService.search_videos_in_directory(
@@ -215,62 +193,10 @@ async def resolve_search_in_directory(input: SearchInDirectoryInput, info: straw
             tags=validated_input.tags,
         )
     )
-    return await _to_browse_nodes(entries, info)
+    return await to_browse_nodes(entries, info)
 
 
-async def _to_browse_nodes(entries: list[BrowseEntry], info: strawberry.Info) -> list[FileBrowseNode]:
-    """Present a listing, resolving the series position of every video row in one lookup."""
-    positions = await _series_positions(
-        info, [e.document for e in entries if isinstance(e, VideoEntry)]
-    )
-    return [await _to_browse_node(entry, positions) for entry in entries]
 
-
-async def _series_positions(info: strawberry.Info, video_models: list) -> dict[str, SeriesPlacement]:
-    seriesService: SeriesService = get_context_value(info, ContextEnum.SERIES_SERVICE)
-    return await seriesService.positions_of(video_models)
-
-
-async def _to_browse_node(
-    entry: BrowseEntry, positions: dict[str, SeriesPlacement]
-) -> FileBrowseNode:
-    """
-    Present one directory-listing entry as the GraphQL node the frontend consumes.
-
-    The schema models both rows as a ``Video``, so a directory is given a throwaway
-    ObjectId to satisfy the non-null ``id`` field. That is a quirk of this transport and
-    stays here: the browse service deals in directories and documents, and has no reason
-    to mint identifiers for things that do not have one.
-
-    :param entry: A directory or video row produced by ``BrowseFileService``.
-    :type entry: BrowseEntry
-    :param positions: Series placements for the listing's videos, keyed by video id.
-    :type positions: dict[str, SeriesPlacement]
-    :return: The node in its published shape.
-    :rtype: FileBrowseNode
-    """
-    if isinstance(entry, DirectoryEntry):
-        return FileBrowseNode(
-            node=Video.create_new(
-                id=strawberry.ID(str(ObjectId())),
-                name=entry.name,
-                isDir=True,
-                lastModifyTime=entry.last_modify_time,
-                size=entry.size,
-            )
-        )
-
-    return FileBrowseNode(
-        node=await Video.from_mongoDB(
-            entry.document,
-            getTagsCount=False,
-            isLocked=entry.is_locked,
-            # Empty means "in the directory that was asked about", which is every row of
-            # an ordinary listing — published as null rather than as an empty string.
-            relativePath=entry.relative_dir or None,
-            series=positions.get(str(entry.document.id)),
-        )
-    )
 
 async def resolve_search_series_by_prefix(prefix: str, limit: int, info: strawberry.Info) -> list[str]:
     """
@@ -334,14 +260,10 @@ async def resolve_directory_metadata(input: RelativePathInput, info: strawberry.
     :return: Directory metadata result containing total size and last modified time.
     :rtype: DirectoryMetadataResult
     """
-    try:
-        relativePathInputModel = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="RelativePathInput", issue="Invalid input data for directory metadata")
+    validated_input = validate_input(input, logger, "RelativePathInput")
     
     abs_path = AbsolutePath.from_relative_path(
-        parsedPath=relativePathInputModel.parsedPath,
+        parsedPath=validated_input.parsedPath,
         handlerService=get_context_value(info, ContextEnum.RESOURCE_HANDLER_SERVICE),
         settings=get_context_value(info, ContextEnum.SETTINGS)
     )

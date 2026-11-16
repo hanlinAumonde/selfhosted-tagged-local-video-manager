@@ -1,5 +1,4 @@
 from typing import AsyncGenerator
-from fastapi.concurrency import run_in_threadpool
 import strawberry
 from src.context import ContextEnum, get_context_value
 from src.errors import InputValidationError
@@ -8,6 +7,7 @@ from src.schema.types.fileBrowse_type import (
     BatchOperationStatus,
     VideosBatchOperationInput
 )
+from src.resolvers.utils import validate_input
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
 from src.features.catalog.catalog_service import CatalogService
@@ -28,11 +28,7 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
     :return: An asynchronous generator yielding the status of the batch update operation.
     :rtype: AsyncGenerator[BatchOperationStatus, None]
     """
-    try:
-        validated_input = input.to_pydantic()
-    except Exception as e:
-        logger.exception(f"Input validation error: {e}")
-        raise InputValidationError(field="VideosBatchOperationInput", issue="Invalid input data for batch updating videos")
+    validated_input = validate_input(input, logger, "VideosBatchOperationInput")
 
     dir_path = AbsolutePath.from_relative_path(
         parsedPath=validated_input.relativePath.parsedPath,
@@ -90,8 +86,7 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
     all_entries = []
     for cat, abs_path in category_path_pairs:
         browseFileService: BrowseFileService = get_context_value(info, ContextEnum.BROWSE_FILE_SERVICE)
-        entries = await run_in_threadpool(
-            browseFileService.get_all_video_entries_in_directory,
+        entries = await browseFileService.get_all_video_entries_in_directory(
             abs_path.FS_format_path(),
             cat
         )

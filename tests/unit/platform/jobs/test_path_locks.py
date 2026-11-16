@@ -2,9 +2,8 @@
 The generic path-lock registry.
 
 Answers "is this path held by a job that has not settled?" without knowing what kind of
-job holds it. Providers register at startup, the same way executors register on the
-TaskRunner, so a second kind of task can reserve files without the readers that display
-them learning anything new.
+job holds it. Providers register at startup, so a second kind of task can reserve files
+without the readers that display them learning anything new.
 """
 
 import ast

@@ -44,7 +44,10 @@ class VideoStreamService:
             category=video.category,
             handler=handler
         ).FS_format_path()
-        if not handler.file_exists(video_fs_path):
+        # One round-trip answers both "is it there" and "how big is it": on S3 each of
+        # those used to be its own request, on every Range request a player sends.
+        file_info = await handler.stat(video_fs_path)
+        if file_info is None:
             raise HTTPException(status_code=404, detail="video file doesn't exist")
 
         ext = handler.get_file_extension(video_fs_path).lower()
@@ -54,7 +57,7 @@ class VideoStreamService:
             return await self._stream_transcoded(handler, video_fs_path)
 
         # Browser-supported formats: direct streaming with Range support
-        file_size = handler.get_size(video_fs_path)
+        file_size = file_info.size
         range_header = request.headers.get("Range")
 
         try:

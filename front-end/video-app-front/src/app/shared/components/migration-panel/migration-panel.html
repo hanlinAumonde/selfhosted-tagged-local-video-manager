@@ -109,7 +109,7 @@
   }
 
   <!-- ═══════════ Step 2: Preflight Results ═══════════ -->
-  @if (currentStep() === 'preflight') {
+  @if (currentStep() === 'preflight' && !isBatch) {
     <div class="space-y-3">
       <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">Preflight check results</p>
 
@@ -188,6 +188,84 @@
             <mat-icon fontIcon="check_circle" class="text-green-500 text-base!"></mat-icon>
             <span class="text-green-600 dark:text-green-400">All checks passed. Ready to migrate.</span>
           </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- ═══════════ Step 2: Batch Preflight Results ═══════════ -->
+  @if (currentStep() === 'preflight' && isBatch && batchPreflight(); as preflight) {
+    <div class="space-y-3">
+      <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">Preflight check results</p>
+
+      <div class="space-y-2">
+        <div class="flex items-center gap-2 text-sm">
+          <mat-icon fontIcon="arrow_forward" class="text-gray-400 text-base!"></mat-icon>
+          <span>{{ sourceCurrentDir }} → {{ selectedTargetDir() }}</span>
+        </div>
+
+        <!-- Space Check: for the files to be moved together -->
+        @if (preflight.spaceSufficient != null) {
+          <div class="flex items-center gap-2 text-sm">
+            @if (preflight.spaceSufficient) {
+              <mat-icon fontIcon="check_circle" class="text-green-500 text-base!"></mat-icon>
+              <span>Space sufficient ({{ formatSize(preflight.totalSize) }} needed, {{ formatSize(preflight.spaceAvailable ?? 0) }} available)</span>
+            } @else {
+              <mat-icon fontIcon="error" class="text-red-500 text-base!"></mat-icon>
+              <span class="text-red-500">Insufficient space ({{ formatSize(preflight.totalSize) }} needed, {{ formatSize(preflight.spaceAvailable ?? 0) }} available)</span>
+            }
+          </div>
+        }
+
+        <!-- Ready -->
+        <div class="flex items-center gap-2 text-sm">
+          <mat-icon fontIcon="check_circle" class="text-green-500 text-base!"></mat-icon>
+          <span>{{ batchReady().length }} file(s) ready to migrate</span>
+        </div>
+
+        <!-- Conflicts: one strategy for all of them -->
+        @if (batchConflicts().length > 0) {
+          <div class="flex items-center gap-2 text-sm">
+            <mat-icon fontIcon="file_copy" class="text-amber-500 text-base!"></mat-icon>
+            <span class="text-amber-600 dark:text-amber-400">
+              {{ batchConflicts().length }} file(s) have a namesake in the target directory
+            </span>
+          </div>
+          <ul class="ml-8 max-h-24 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 list-disc">
+            @for (item of batchConflicts(); track item.sourceVideoId) {
+              <li class="truncate">{{ nameOf(item.sourceVideoId) }}</li>
+            }
+          </ul>
+
+          <div class="ml-6 space-y-1">
+            <p class="text-sm text-gray-500 dark:text-gray-400">Conflict strategy:</p>
+            <mat-radio-group [value]="conflictStrategy()" (change)="conflictStrategy.set($event.value)">
+              <div class="flex flex-col gap-1">
+                <mat-radio-button value="rename">
+                  <span class="text-sm">Rename (add suffix to new files)</span>
+                </mat-radio-button>
+                <mat-radio-button value="overwrite">
+                  <span class="text-sm text-red-600 dark:text-red-400">Overwrite existing files</span>
+                </mat-radio-button>
+                <mat-radio-button value="skip">
+                  <span class="text-sm">Skip these files</span>
+                </mat-radio-button>
+              </div>
+            </mat-radio-group>
+          </div>
+        }
+
+        <!-- Excluded: failed a check, never sent -->
+        @if (batchExcluded().length > 0) {
+          <div class="flex items-center gap-2 text-sm">
+            <mat-icon fontIcon="block" class="text-gray-400 text-base!"></mat-icon>
+            <span class="text-gray-600 dark:text-gray-300">{{ batchExcluded().length }} file(s) will be left out</span>
+          </div>
+          <ul class="ml-8 max-h-24 overflow-y-auto text-xs text-gray-500 dark:text-gray-400 list-disc">
+            @for (item of batchExcluded(); track item.sourceVideoId) {
+              <li class="truncate">{{ nameOf(item.sourceVideoId) }} — {{ exclusionReason(item) }}</li>
+            }
+          </ul>
         }
       </div>
     </div>

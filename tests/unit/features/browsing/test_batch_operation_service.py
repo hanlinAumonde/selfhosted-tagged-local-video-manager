@@ -219,7 +219,7 @@ async def test_batch_update_creates_new_video_from_entry(
 ):
     handler = local_resource_handler_service.get_handler("Test-category")
     movie_a_path = str(local_resource_dir / "movie_a.mp4").replace("\\", "/")
-    entry = handler.get_entry(movie_a_path)
+    entry = await handler.stat(movie_a_path)
 
     events = await _collect(
         batch_svc.batch_update(
@@ -279,7 +279,7 @@ async def test_batch_delete_by_file_entries_removes_from_db_and_disk(
     await video_factory(name="movie_a", path=db_path)
     assert (local_resource_dir / "movie_a.mp4").exists()
 
-    entry = handler.get_entry(fs_path)
+    entry = await handler.stat(fs_path)
     dir_path = _make_abs_path(
         local_resource_handler_service,
         str(local_resource_dir).replace("\\", "/"),

@@ -3,11 +3,16 @@ from typing import Optional
 
 import strawberry
 
+from src.features.migration import migration_service
+from src.features.migration.migration_batch import BatchSummary
 from src.features.migration.migration_task import MigrationTaskModel
 from src.platform.jobs.progress import ProgressFrame
 from src.schema.types.fileBrowse_type import RelativePathInput
 from src.schema.types.scalars import BigInt
 from src.schema.types.pydantic_types.migration_type import (
+    CreateMigrationBatchInputModel,
+    MigrationBatchActionInputModel,
+    MigrationBatchPreflightInputModel,
     MigrationPreflightInputModel,
     CreateMigrationTaskInputModel,
     MigrationTaskActionInputModel,
@@ -20,9 +25,9 @@ class MigrationStatusEnum(Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     PROCESS_DONE = "PROCESS_DONE"
-    UPDATING_DB = "UPDATING_DB"
-    DB_UPDATED = "DB_UPDATED"
-    DELETING_SOURCE = "DELETING_SOURCE"
+    COMMITTING = "COMMITTING"
+    COMMITTED = "COMMITTED"
+    CLEANING_UP = "CLEANING_UP"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
@@ -38,6 +43,21 @@ class MigrationPreflightResult:
     already_migrating: bool
     same_location: bool
     error_message: str | None = None
+
+    @classmethod
+    def from_service(
+        cls, result: migration_service.MigrationPreflightResult
+    ) -> "MigrationPreflightResult":
+        return cls(
+            valid=result.valid,
+            source_file_size=result.source_file_size,
+            conflict_exists=result.conflict_exists,
+            space_available=result.space_available,
+            space_sufficient=result.space_sufficient,
+            already_migrating=result.already_migrating,
+            same_location=result.same_location,
+            error_message=result.error_message,
+        )
 
 
 @strawberry.type
@@ -58,6 +78,7 @@ class MigrationTask:
     created_at: float
     updated_at: float
     completed_at: float | None
+    batch_id: strawberry.ID | None
 
     @classmethod
     def from_model(cls, model: MigrationTaskModel) -> "MigrationTask":
@@ -78,6 +99,7 @@ class MigrationTask:
             created_at=model.created_at,
             updated_at=model.updated_at,
             completed_at=model.completed_at,
+            batch_id=strawberry.ID(str(model.batch_id)) if model.batch_id else None,
         )
 
 
@@ -131,6 +153,63 @@ class MigrationTaskMutationResult:
     error_message: str | None = None
 
 
+@strawberry.type
+class MigrationBatchPreflightItem:
+    source_video_id: strawberry.ID
+    result: MigrationPreflightResult
+
+
+@strawberry.type
+class MigrationBatchPreflightResult:
+    valid: bool
+    total_size: BigInt
+    space_available: BigInt | None
+    space_sufficient: bool | None
+    items: list[MigrationBatchPreflightItem]
+
+
+@strawberry.type
+class SkippedMigrationSource:
+    source_video_id: strawberry.ID
+    reason: str
+
+
+@strawberry.type
+class CreateMigrationBatchResult:
+    batch_id: strawberry.ID | None
+    tasks: list[MigrationTask]
+    skipped: list[SkippedMigrationSource]
+
+
+@strawberry.type
+class MigrationBatchSummary:
+    batch_id: strawberry.ID
+    total: int
+    active: int
+    completed: int
+    failed: int
+    cancelled: int
+
+    @classmethod
+    def from_service(cls, summary: BatchSummary) -> "MigrationBatchSummary":
+        return cls(
+            batch_id=strawberry.ID(summary.batch_id),
+            total=summary.total,
+            active=summary.active,
+            completed=summary.completed,
+            failed=summary.failed,
+            cancelled=summary.cancelled,
+        )
+
+
+@strawberry.type
+class MigrationBatchProgress:
+    """The batch's counts when they may have changed, and a child's frame when one came."""
+
+    summary: MigrationBatchSummary | None = None
+    task: MigrationProgressStatus | None = None
+
+
 # --- Input types ---
 
 @strawberry.experimental.pydantic.input(model=MigrationPreflightInputModel)
@@ -156,3 +235,22 @@ class MigrationTaskQueryInput:
     status_filter: strawberry.auto
     page: strawberry.auto
     page_size: strawberry.auto
+    batch_id: strawberry.auto
+
+
+@strawberry.experimental.pydantic.input(model=MigrationBatchPreflightInputModel)
+class MigrationBatchPreflightInput:
+    source_video_ids: strawberry.auto
+    target_dir_relative_path: RelativePathInput
+
+
+@strawberry.experimental.pydantic.input(model=CreateMigrationBatchInputModel)
+class CreateMigrationBatchInput:
+    source_video_ids: strawberry.auto
+    target_dir_relative_path: RelativePathInput
+    conflict_strategy: strawberry.auto
+
+
+@strawberry.experimental.pydantic.input(model=MigrationBatchActionInputModel)
+class MigrationBatchActionInput:
+    batch_id: strawberry.auto

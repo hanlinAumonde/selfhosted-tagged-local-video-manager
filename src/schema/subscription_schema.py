@@ -7,6 +7,8 @@ from src.schema.types.fileBrowse_type import (
     VideosBatchOperationInput,
 )
 from src.schema.types.migration_type import (
+    MigrationBatchActionInput,
+    MigrationBatchProgress,
     MigrationProgressStatus,
     MigrationTaskActionInput,
 )
@@ -40,3 +42,10 @@ class Subscription:
     ) -> AsyncGenerator[MigrationProgressStatus, None]:
         async for status in migration_resolver.resolve_migration_retry(input=input, info=info):
             yield status
+
+    @strawberry.subscription
+    async def migrationBatchProgress(
+        self, info: strawberry.Info, input: MigrationBatchActionInput
+    ) -> AsyncGenerator[MigrationBatchProgress, None]:
+        async for event in migration_resolver.resolve_migration_batch_progress(input=input, info=info):
+            yield event

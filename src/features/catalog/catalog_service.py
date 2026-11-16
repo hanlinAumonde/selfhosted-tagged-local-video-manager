@@ -597,7 +597,7 @@ class CatalogService:
             )
 
             video_fs_path = video_path.FS_format_path()
-            handler.delete_file(video_fs_path)
+            await handler.delete_file(video_fs_path)
 
             directory_path = handler.dirname(video_fs_path)
             if directory_path:

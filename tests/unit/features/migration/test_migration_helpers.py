@@ -121,27 +121,27 @@ class TestUpdateTaskStatus:
 # =======================================================================
 
 class TestGenerateUniqueName:
-    def test_generates_counter_1(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
+    async def test_generates_counter_1(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
         handler = two_cat_handler_service.get_handler("Target-category")
         target_fs = str(target_dir).replace("\\", "/")
 
-        result = MigrationService._generate_unique_name(handler, target_fs, "video.mp4")
+        result = await MigrationService._generate_unique_name(handler, target_fs, "video.mp4")
         assert "video(1).mp4" in result
 
-    def test_skips_existing_counter(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
+    async def test_skips_existing_counter(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
         handler = two_cat_handler_service.get_handler("Target-category")
         target_fs = str(target_dir).replace("\\", "/")
 
         (target_dir / "video(1).mp4").write_bytes(b"x")
 
-        result = MigrationService._generate_unique_name(handler, target_fs, "video.mp4")
+        result = await MigrationService._generate_unique_name(handler, target_fs, "video.mp4")
         assert "video(2).mp4" in result
 
-    def test_file_without_extension(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
+    async def test_file_without_extension(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
         handler = two_cat_handler_service.get_handler("Target-category")
         target_fs = str(target_dir).replace("\\", "/")
 
-        result = MigrationService._generate_unique_name(handler, target_fs, "noext")
+        result = await MigrationService._generate_unique_name(handler, target_fs, "noext")
         assert "noext(1)" in result
         assert "." not in result.rsplit("/", 1)[-1] or result.endswith("(1)")
 
@@ -151,15 +151,15 @@ class TestGenerateUniqueName:
 # =======================================================================
 
 class TestCleanupTarget:
-    def test_cleanup_existing_file(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
+    async def test_cleanup_existing_file(self, two_cat_migration_svc, two_cat_handler_service, target_dir):
         handler = two_cat_handler_service.get_handler("Target-category")
         target_file = target_dir / "to_clean.mp4"
         target_file.write_bytes(b"data")
         target_fs = str(target_file).replace("\\", "/")
 
-        MigrationService._cleanup_target(handler, target_fs)
+        await MigrationService._cleanup_target(handler, target_fs)
         assert not target_file.exists()
 
-    def test_cleanup_nonexistent_file_is_noop(self, two_cat_migration_svc, two_cat_handler_service):
+    async def test_cleanup_nonexistent_file_is_noop(self, two_cat_migration_svc, two_cat_handler_service):
         handler = two_cat_handler_service.get_handler("Target-category")
-        MigrationService._cleanup_target(handler, "Z:/nonexistent/file.mp4")
+        await MigrationService._cleanup_target(handler, "Z:/nonexistent/file.mp4")

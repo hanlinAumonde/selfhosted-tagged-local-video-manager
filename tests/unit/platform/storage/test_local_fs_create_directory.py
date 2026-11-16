@@ -19,13 +19,13 @@ pytestmark = pytest.mark.unit
 # ---------------------------- Happy path --------------------------------
 # -----------------------------------------------------------------------
 
-def test_create_directory_creates_the_directory_on_disk(
+async def test_create_directory_creates_the_directory_on_disk(
     local_handler, local_resource_dir: Path,
 ):
     target = local_resource_dir / "new_folder"
     assert not target.exists()
 
-    local_handler.create_directory(str(target))
+    await local_handler.create_directory(str(target))
 
     assert target.is_dir()
 
@@ -34,22 +34,22 @@ def test_create_directory_creates_the_directory_on_disk(
 # ------------------------- Refusals -------------------------------------
 # -----------------------------------------------------------------------
 
-def test_create_directory_rejects_an_existing_directory(
+async def test_create_directory_rejects_an_existing_directory(
     local_handler, local_resource_dir: Path,
 ):
     existing = local_resource_dir / "subdir"
 
     with pytest.raises(FileExistsError):
-        local_handler.create_directory(str(existing))
+        await local_handler.create_directory(str(existing))
 
 
-def test_create_directory_rejects_an_existing_file(
+async def test_create_directory_rejects_an_existing_file(
     local_handler, local_resource_dir: Path,
 ):
     existing = local_resource_dir / "movie_a.mp4"
 
     with pytest.raises(FileExistsError):
-        local_handler.create_directory(str(existing))
+        await local_handler.create_directory(str(existing))
 
     assert existing.is_file()
     assert existing.read_bytes() == b"a" * 100

@@ -47,7 +47,7 @@ def s3_handler() -> S3ResourceHandler:
 
 @pytest.fixture
 def stub(s3_handler: S3ResourceHandler) -> Stubber:
-    stubber = Stubber(s3_handler._buckets[PSEUDO_NAME].meta.client)
+    stubber = Stubber(s3_handler._clients[PSEUDO_NAME])
     with stubber:
         yield stubber
 
@@ -68,7 +68,7 @@ def _expect_listing(stub: Stubber, *keys: str) -> None:
 # ------------------------- Deleting -------------------------------------
 # -----------------------------------------------------------------------
 
-def test_delete_directory_deletes_the_marker_object(
+async def test_delete_directory_deletes_the_marker_object(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_listing(stub, MARKER_KEY)
@@ -76,23 +76,23 @@ def test_delete_directory_deletes_the_marker_object(
         "delete_object", {}, {"Bucket": BUCKET, "Key": MARKER_KEY}
     )
 
-    s3_handler.delete_directory(DIR_KEY)
+    await s3_handler.delete_directory(DIR_KEY)
 
     stub.assert_no_pending_responses()
 
 
-def test_delete_directory_refuses_a_prefix_that_still_holds_an_object(
+async def test_delete_directory_refuses_a_prefix_that_still_holds_an_object(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_listing(stub, MARKER_KEY, MARKER_KEY + "movie.mp4")
 
     with pytest.raises(OSError):
-        s3_handler.delete_directory(DIR_KEY)
+        await s3_handler.delete_directory(DIR_KEY)
 
     stub.assert_no_pending_responses()
 
 
-def test_delete_directory_is_not_confused_by_a_path_without_a_trailing_slash(
+async def test_delete_directory_is_not_confused_by_a_path_without_a_trailing_slash(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_listing(stub, MARKER_KEY)
@@ -101,7 +101,7 @@ def test_delete_directory_is_not_confused_by_a_path_without_a_trailing_slash(
     )
 
     # The same directory, written the way a listing reports it.
-    s3_handler.delete_directory(MARKER_KEY)
+    await s3_handler.delete_directory(MARKER_KEY)
 
     stub.assert_no_pending_responses()
 
@@ -110,23 +110,23 @@ def test_delete_directory_is_not_confused_by_a_path_without_a_trailing_slash(
 # --------------------- Asking what is left ------------------------------
 # -----------------------------------------------------------------------
 
-def test_is_directory_empty_is_true_when_only_the_marker_is_under_the_prefix(
+async def test_is_directory_empty_is_true_when_only_the_marker_is_under_the_prefix(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_listing(stub, MARKER_KEY)
 
-    assert s3_handler.is_directory_empty(DIR_KEY) is True
+    assert await s3_handler.is_directory_empty(DIR_KEY) is True
 
 
-def test_is_directory_empty_is_false_when_another_object_is_under_the_prefix(
+async def test_is_directory_empty_is_false_when_another_object_is_under_the_prefix(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     _expect_listing(stub, MARKER_KEY, MARKER_KEY + "movie.mp4")
 
-    assert s3_handler.is_directory_empty(DIR_KEY) is False
+    assert await s3_handler.is_directory_empty(DIR_KEY) is False
 
 
-def test_is_directory_empty_is_true_for_a_prefix_with_no_keys_at_all(
+async def test_is_directory_empty_is_true_for_a_prefix_with_no_keys_at_all(
     s3_handler: S3ResourceHandler, stub: Stubber,
 ):
     stub.add_response(
@@ -135,4 +135,4 @@ def test_is_directory_empty_is_true_for_a_prefix_with_no_keys_at_all(
         {"Bucket": BUCKET, "Prefix": MARKER_KEY, "MaxKeys": 2},
     )
 
-    assert s3_handler.is_directory_empty(DIR_KEY) is True
+    assert await s3_handler.is_directory_empty(DIR_KEY) is True

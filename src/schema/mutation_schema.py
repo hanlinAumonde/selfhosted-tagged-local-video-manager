@@ -2,6 +2,9 @@ import strawberry
 
 from src.schema.types.fileBrowse_type import DirectoryMutationResult, VideoMutationResult
 from src.schema.types.migration_type import (
+    CreateMigrationBatchResult,
+    MigrationBatchPreflightResult,
+    MigrationBatchSummary,
     MigrationPreflightResult,
     MigrationTaskMutationResult,
 )
@@ -22,3 +25,11 @@ class Mutation:
     createMigrationTask: MigrationTaskMutationResult = strawberry.mutation(resolver=migration_resolver.resolve_create_migration_task)
 
     cancelMigrationTask: MigrationTaskMutationResult = strawberry.mutation(resolver=migration_resolver.resolve_cancel_migration_task)
+
+    migrationBatchPreflight: MigrationBatchPreflightResult = strawberry.mutation(resolver=migration_resolver.resolve_migration_batch_preflight)
+
+    createMigrationBatch: CreateMigrationBatchResult = strawberry.mutation(resolver=migration_resolver.resolve_create_migration_batch)
+
+    cancelMigrationBatch: MigrationBatchSummary = strawberry.mutation(resolver=migration_resolver.resolve_cancel_migration_batch)
+
+    retryMigrationBatch: MigrationBatchSummary = strawberry.mutation(resolver=migration_resolver.resolve_retry_migration_batch)

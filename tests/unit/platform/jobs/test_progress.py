@@ -46,7 +46,7 @@ def test_percentage_is_rounded_to_one_decimal():
 
 def test_percentage_is_zero_when_total_is_not_measurable():
     """A task with no measurable total reports 0% rather than dividing by zero."""
-    frame = ProgressFrame(task_id="tid", status="UPDATING_DB", current=0, total=0)
+    frame = ProgressFrame(task_id="tid", status="COMMITTING", current=0, total=0)
 
     assert frame.percentage == 0.0
 

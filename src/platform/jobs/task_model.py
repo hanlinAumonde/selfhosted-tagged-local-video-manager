@@ -9,20 +9,19 @@ class TaskStatus(str, Enum):
     """
     Lifecycle of a background task driven through the three-phase template.
 
-    The phase statuses are named after the migration flow that introduced them, and the
-    values are persisted, so they are kept as-is: renaming a value would mean rewriting
-    stored documents and the frontend's status mapping. Read them structurally —
-    PROCESSING is "move the payload", UPDATING_DB is "update records", DELETING_SOURCE is
-    "settle the filesystem".
+    The phases are split by what can still be undone, not by what they touch. PROCESSING
+    does the work and stays reversible, because a cancel can still land on it. COMMITTING
+    is the point of no return: whatever cannot be taken back belongs there, and it must be
+    idempotent because recovery replays it. CLEANING_UP is best-effort tidying.
     """
 
     # Normal flow
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     PROCESS_DONE = "PROCESS_DONE"
-    UPDATING_DB = "UPDATING_DB"
-    DB_UPDATED = "DB_UPDATED"
-    DELETING_SOURCE = "DELETING_SOURCE"
+    COMMITTING = "COMMITTING"
+    COMMITTED = "COMMITTED"
+    CLEANING_UP = "CLEANING_UP"
     COMPLETED = "COMPLETED"
 
     # Abnormal / interrupted
@@ -52,6 +51,16 @@ class BaseTaskModel(Document):
     created_at: float
     updated_at: float
     completed_at: Optional[float] = None
+
+    # Phase a PENDING task starts at when it is claimed. Stored rather than carried in the
+    # queue message so a redelivered message, a recovery and a retry all agree on it.
+    resume_from: Optional[str] = None
+
+    # Set by the web process; the worker reads it back on its next progress flush.
+    cancel_requested: bool = False
+
+    # Last time the task id was put on its queue; reconciliation re-sends stale ones.
+    dispatched_at: Optional[float] = None
 
     @abstractmethod
     def get_progress(self) -> tuple[int, int]:

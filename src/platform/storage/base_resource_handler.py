@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, ClassVar, Generator, Iterator
+from typing import TYPE_CHECKING, AsyncIterator, Callable, ClassVar
 
-from src.platform.storage.base_file_entry import BaseFileEntry
+from src.platform.storage.file_info import FileInfo
 
 if TYPE_CHECKING:
     from src.config import HandlerConfig, Settings
@@ -34,6 +33,12 @@ class BaseResourceHandler(ABC):
     #: key the registry files this class under; the two must not drift apart.
     storage_type: ClassVar[str]
 
+    #: Whether a streaming write that fails or is abandoned leaves the path as it found it.
+    writes_atomically: ClassVar[bool] = False
+
+    #: Whether a file can reach another path on this storage with no bytes rewritten.
+    moves_without_copying: ClassVar[bool] = False
+
     @classmethod
     @abstractmethod
     def from_config(cls, spec: HandlerBuildSpec) -> BaseResourceHandler:
@@ -43,56 +48,51 @@ class BaseResourceHandler(ABC):
     # --- IO operations ---
 
     @abstractmethod
-    @contextmanager
-    def list_directory(self, path: str) -> Generator[Iterator[BaseFileEntry], None, None]:
+    async def list_directory(self, path: str) -> list[FileInfo]:
         """
-        List entries in a directory. Returns a context manager yielding BaseFileEntry iterator.
+        List the entries of one directory, with every field already read.
 
-        :param path: The path to the directory to list.
+        :param path: FS-format path of the directory to list.
         :type path: str
-        :return: A context manager yielding an iterator of BaseFileEntry objects representing the directory entries.
-        :rtype: Generator[Iterator[BaseFileEntry], None, None]
+        :return: One FileInfo per entry, directories included.
+        :rtype: list[FileInfo]
+        :raises FileNotFoundError: If there is no such directory.
         """
         ...
 
     @abstractmethod
-    def get_entry(self, path: str) -> BaseFileEntry:
+    async def walk(self, path: str) -> AsyncIterator[list[FileInfo]]:
         """
-        Get a single file/directory entry by its path (not via directory listing).
+        Every file and directory below ``path``, in batches.
 
-        :param path: The path to the file or directory.
+        Batches are the storage's natural unit — a directory for local storage, a listing
+        page for S3 — so a caller can check for cancellation or report progress between
+        them without paying a thread hop per file. Directories are reported too: an empty
+        one leaves no other trace, and a caller aggregating per directory must still see it.
+
+        :param path: FS-format path of the directory to walk.
         :type path: str
-        :return: The file or directory entry.
-        :rtype: BaseFileEntry
+        :return: An async iterator of batches of FileInfo.
+        :rtype: AsyncIterator[list[FileInfo]]
+        :raises FileNotFoundError: If there is no such directory.
+        """
+        raise NotImplementedError
+        yield  # Makes this an async generator, like every override.
+
+    @abstractmethod
+    async def stat(self, path: str) -> FileInfo | None:
+        """
+        Existence, size, mtime and type of one path, in a single round-trip.
+
+        :param path: FS-format path of the file or directory.
+        :type path: str
+        :return: The FileInfo, or None if nothing is at that path.
+        :rtype: FileInfo | None
         """
         ...
 
     @abstractmethod
-    def get_size(self, path: str) -> float:
-        """
-        Get the size of a file at the given path.
-
-        :param path: The path to the file.
-        :type path: str
-        :return: The size of the file in bytes.
-        :rtype: float
-        """
-        ...
-
-    @abstractmethod
-    def file_exists(self, path: str) -> bool:
-        """
-        Check if a file exists at the given path.
-
-        :param path: The path to the file.
-        :type path: str
-        :return: True if the file exists, False otherwise.
-        :rtype: bool
-        """
-        ...
-
-    @abstractmethod
-    def delete_file(self, path: str) -> None:
+    async def delete_file(self, path: str) -> None:
         """
         Delete the file at the given path.
 
@@ -102,7 +102,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def create_directory(self, path: str) -> None:
+    async def create_directory(self, path: str) -> None:
         """
         Create a directory at the given path.
 
@@ -118,7 +118,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def delete_directory(self, path: str) -> None:
+    async def delete_directory(self, path: str) -> None:
         """
         Remove the directory at the given path, which must hold nothing.
 
@@ -134,7 +134,7 @@ class BaseResourceHandler(ABC):
         ...
 
     @abstractmethod
-    def is_directory_empty(self, path: str) -> bool:
+    async def is_directory_empty(self, path: str) -> bool:
         """
         Whether the directory holds nothing at all — no files, no sub-directories.
 
@@ -167,6 +167,18 @@ class BaseResourceHandler(ABC):
         """
         ...
 
+    @abstractmethod
+    async def read_file(self, path: str) -> bytes | None:
+        """
+        Read a whole small file (a thumbnail, say) in one round-trip.
+
+        :param path: FS-format path
+        :type path: str
+        :return: The content, or None if there is no such file.
+        :rtype: bytes | None
+        """
+        ...
+
     async def read_file_streaming(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
         """
         Read a file in a streaming manner, yielding chunks of data.
@@ -178,7 +190,10 @@ class BaseResourceHandler(ABC):
         :yield: Chunks of file data as bytes
         :rtype: AsyncIterator[bytes]
         """
-        total_size = self.get_size(path)
+        info = await self.stat(path)
+        if info is None:
+            raise FileNotFoundError(path)
+        total_size = info.size
         offset = 0
         while offset < total_size:
             length = min(chunk_size, total_size - offset)
@@ -212,7 +227,75 @@ class BaseResourceHandler(ABC):
         """
         ...
 
-    def get_available_space(self, path: str) -> int | None:
+    async def link_file(self, source: str, target: str) -> bool:
+        """
+        Give a stored file a second path without copying it, if the storage can.
+
+        :param source: FS-format path of the existing file.
+        :type source: str
+        :param target: FS-format path to add. Must be free.
+        :type target: str
+        :return: True if the file now has both paths. False leaves the storage unchanged,
+            and the caller has to copy instead.
+        :rtype: bool
+        """
+        return False
+
+    async def copy_server_side(
+        self, source: str, target: str, on_progress: Callable[[int], None]
+    ) -> bool:
+        """
+        Have the storage copy a file to another of its paths itself, if it can.
+
+        Unlike a link this takes as long as the file is big, so it reports progress and
+        can be stopped: an exception raised by ``on_progress`` abandons the copy, leaves
+        nothing at ``target``, and propagates.
+
+        :param source: FS-format path of the existing file.
+        :type source: str
+        :param target: FS-format path to copy it to.
+        :type target: str
+        :param on_progress: Called with the bytes copied so far as the copy advances.
+        :type on_progress: Callable[[int], None]
+        :return: True if the copy is complete. False leaves the storage unchanged, and
+            the caller has to stream the file instead.
+        :rtype: bool
+        :raises FileNotFoundError: If there is no file at ``source``.
+        """
+        return False
+
+    async def can_rename(self, source: str, target: str) -> bool:
+        """
+        Whether a file in ``source``'s directory could be renamed into ``target``'s.
+
+        Answered by trying it on an empty file: only the operating system knows, since
+        two bind mounts can look like one filesystem and still refuse.
+
+        :param source: FS-format path of the file that would move.
+        :type source: str
+        :param target: FS-format path it would end up at.
+        :type target: str
+        :return: True if the rename would work. Either way ``source`` is left untouched.
+        :rtype: bool
+        """
+        return False
+
+    async def replace_file(self, staged: str, target: str) -> None:
+        """
+        Atomically move a file onto ``target``, replacing anything already there.
+
+        Only called on storage whose writes are not atomic, since that is the only kind
+        that needs to stage a file first or can rename one.
+
+        :param staged: FS-format path of the file to move.
+        :type staged: str
+        :param target: FS-format path it ends up at.
+        :type target: str
+        :rtype: None
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot replace a staged file")
+
+    async def get_available_space(self, path: str) -> int | None:
         """
         Get the available space at the given path. Returns None if not applicable.
 

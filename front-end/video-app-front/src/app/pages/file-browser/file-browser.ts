@@ -98,6 +98,7 @@ export class FileBrowser implements OnDestroy{
         name: item.node.name,
         seriesName: item.node.seriesName ?? null,
         seriesOrder: item.node.seriesOrder ?? null,
+        size: item.node.size,
       }));
   });
 

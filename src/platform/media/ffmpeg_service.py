@@ -10,12 +10,11 @@ logger = get_logger("ffmpeg_service")
 class FFmpegService:
 
     def __init__(self, semaphore_limit: int):
-        self._semaphore = asyncio.Semaphore(
-            max(
-                semaphore_limit,
-                os.cpu_count() // 2
-            )
+        cpu_ceiling = max(
+            1, 
+            (os.cpu_count() or 2) // 2
         )
+        self._semaphore = asyncio.Semaphore(max(1, min(semaphore_limit, cpu_ceiling)))
 
     # --- Thumbnail generation ---
 
@@ -269,7 +268,10 @@ class FFmpegService:
         :type stdin: asyncio.StreamWriter
         """
         try:
-            file_size = int(handler.get_size(fs_path))
+            file_info = await handler.stat(fs_path)
+            if file_info is None:
+                raise FileNotFoundError(fs_path)
+            file_size = int(file_info.size)
             offset = 0
             chunk_size = 1024 * 1024
             while offset < file_size:

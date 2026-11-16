@@ -1,3 +1,37 @@
+# What every backend process shares: the image, the resource mounts, ffmpeg, .env and the
+# container-network addresses. The web process and each worker differ only in command,
+# so a new mount is added here once rather than once per process.
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  volumes:
+    - ./logs:/app/logs
+    # Resource mounts: host paths come from .env (LOCAL_RESOURCE_n), the same
+    # variables config.yaml reads. format: <host path>:/app/resources/<category>/<pseudo_name>
+
+    # E.g. :
+    - ${LOCAL_RESOURCE_1:?set LOCAL_RESOURCE_1 in .env}:/app/resources/Local-resource/Resource-1
+    - ${LOCAL_RESOURCE_2:?set LOCAL_RESOURCE_2 in .env}:/app/resources/Local-resource/Resource-2
+    - ${LOCAL_RESOURCE_3:?set LOCAL_RESOURCE_3 in .env}:/app/resources/Local-resource/Resource-3
+  # Everything the backend reads (secrets, tunables) comes from .env ...
+  env_file: .env
+  environment:
+    # env that contains docker network expressions which don't make sense in env file
+    - ROOT_PATH=/app/resources
+    - MONGO_HOST=mongodb
+    - MONGO_PORT=27017
+    - REDIS_URL=redis://redis:6379/0
+    - S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000
+  depends_on:
+    mongodb:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - video-app-network
+
 services:
   frontend:
     build:
@@ -17,38 +51,10 @@ services:
           path: ./front-end/video-app-front/src
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *backend-common
     container_name: video-app-backend
     ports:
       - "12000:12000"
-    volumes:
-      - ./logs:/app/logs
-      # Resource mounts: host paths come from .env (LOCAL_RESOURCE_n), the same
-      # variables config.yaml reads. format: <host path>:/app/resources/<category>/<pseudo_name>
-
-      # E.g. :
-      - ${LOCAL_RESOURCE_1:?set LOCAL_RESOURCE_1 in .env}:/app/resources/Local-resource/Resource-1
-      - ${LOCAL_RESOURCE_2:?set LOCAL_RESOURCE_2 in .env}:/app/resources/Local-resource/Resource-2
-      - ${LOCAL_RESOURCE_3:?set LOCAL_RESOURCE_3 in .env}:/app/resources/Local-resource/Resource-3
-    # Everything the backend reads (secrets, tunables) comes from .env ...
-    env_file: .env
-    environment:
-      # env that contains docker network expressions which don't make sense in env file
-      - ROOT_PATH=/app/resources
-      - MONGO_HOST=mongodb
-      - MONGO_PORT=27017
-      - REDIS_URL=redis://redis:6379/0
-      - S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000
-    depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - video-app-network
     develop:
       watch:
         - action: sync+restart
@@ -63,6 +69,38 @@ services:
           path: ./config.yaml
           target: /app/config.yaml
         
+        - action: rebuild
+          path: ./pyproject.toml
+        - action: rebuild
+          path: ./uv.lock
+
+  # Runs every migration; the web process only queues them, so restarting the backend
+  # never interrupts a copy.
+  # Exactly ONE process per queue: --workers 1, and never scale this service. Recovery at
+  # startup treats every unfinished migration as this worker's own orphan.
+  # --max-async-tasks is not the concurrency limit (tasks.max_concurrent and
+  # tasks.slots_per_device are); it must stay well above tasks.max_concurrent.
+  worker-migration:
+    <<: *backend-common
+    container_name: video-app-worker-migration
+    command:
+      - taskiq
+      - worker
+      - src.worker:create_broker
+      - --workers
+      - "1"
+      - --ack-type
+      - when_received
+      - --max-async-tasks
+      - "16"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./src
+          target: /app/src
+        - action: sync+restart
+          path: ./config.yaml
+          target: /app/config.yaml
         - action: rebuild
           path: ./pyproject.toml
         - action: rebuild
@@ -111,12 +149,15 @@ services:
   redis:
     image: redis:latest
     container_name: video-app-redis
-    # A pure cache: memory is capped and the least recently used keys are evicted
-    # at the cap; nothing is persisted to disk.
+    # Cache, task queues and progress channels. Memory is capped and, at the cap, only
+    # keys with a TTL are evicted (volatile-lru): every cache entry has one, the queue
+    # streams have none, so pending tasks are never evicted to make room for cache.
+    # Nothing is persisted; messages lost with a restart are re-sent by the workers'
+    # reconciliation from MongoDB.
     command: >
       redis-server
       --maxmemory ${REDIS_MAXMEMORY:-256mb}
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --save ""
       --appendonly no
     ports:

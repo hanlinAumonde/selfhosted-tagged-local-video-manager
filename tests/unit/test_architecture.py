@@ -171,3 +171,44 @@ class TestPlatformStaysGeneric:
                 offenders[_relative(path)] = leaked
 
         assert offenders == {}, f"platform modules importing features: {offenders}"
+
+    # Scenario: the platform layer does not lean on the web framework for its threads
+    #   Given every module under src/platform
+    #   When their imports are scanned
+    #   Then none imports fastapi — the worker process has no FastAPI, and both processes
+    #       must offload IO the same way
+    def test_platform_does_not_import_fastapi(self):
+        offenders = sorted(
+            _relative(path)
+            for path in (SRC / "platform").rglob("*.py")
+            if "__pycache__" not in path.parts
+            and any(
+                name == "fastapi" or name.startswith("fastapi.")
+                for name in _imported_modules(path)
+            )
+        )
+
+        assert offenders == [], f"platform modules importing fastapi: {offenders}"
+
+
+class TestTaskiqStaysAtTheEdge:
+    """The broker library is a delivery detail of two modules; the state machine, the
+    features and the web layer only ever see a dispatcher."""
+
+    # Scenario: taskiq is confined to the dispatcher and the worker's assembly root
+    #   Given every module under src
+    #   When their imports are scanned
+    #   Then only src/platform/jobs/dispatch.py and src/worker.py import taskiq or taskiq_redis
+    def test_taskiq_is_imported_only_by_dispatch_and_worker(self):
+        allowed = {"src/platform/jobs/dispatch.py", "src/worker.py"}
+        importers = {
+            _relative(path)
+            for path in SRC.rglob("*.py")
+            if "__pycache__" not in path.parts
+            and any(
+                name.split(".")[0] in ("taskiq", "taskiq_redis")
+                for name in _imported_modules(path)
+            )
+        }
+
+        assert importers - allowed == set(), f"modules importing taskiq: {sorted(importers - allowed)}"

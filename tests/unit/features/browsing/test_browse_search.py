@@ -49,7 +49,7 @@ def _names(entries: list[VideoEntry]) -> list[str]:
 # ------------------- search operator on the recursive walk ---------------
 # -----------------------------------------------------------------------
 
-def test_walk_without_operator_returns_every_video_as_before(
+async def test_walk_without_operator_returns_every_video_as_before(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     """
@@ -60,12 +60,12 @@ def test_walk_without_operator_returns_every_video_as_before(
     """
     root_fs = str(local_resource_dir).replace("\\", "/")
 
-    entries = browse_svc.get_all_video_entries_in_directory(root_fs, "Test-category")
+    entries = await browse_svc.get_all_video_entries_in_directory(root_fs, "Test-category")
 
     assert sorted(e.name for e in entries) == ["movie_a.mp4", "movie_b.mp4", "movie_c.mp4"]
 
 
-def test_operator_returning_false_excludes_the_entry(
+async def test_operator_returning_false_excludes_the_entry(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     """
@@ -75,14 +75,14 @@ def test_operator_returning_false_excludes_the_entry(
     """
     root_fs = str(local_resource_dir).replace("\\", "/")
 
-    entries = browse_svc.get_all_video_entries_in_directory(
+    entries = await browse_svc.get_all_video_entries_in_directory(
         root_fs, "Test-category", search_operator=lambda entry: entry.name == "movie_b.mp4",
     )
 
     assert [e.name for e in entries] == ["movie_b.mp4"]
 
 
-def test_operator_returning_none_keeps_the_entry(
+async def test_operator_returning_none_keeps_the_entry(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     """
@@ -92,14 +92,14 @@ def test_operator_returning_none_keeps_the_entry(
     """
     root_fs = str(local_resource_dir).replace("\\", "/")
 
-    entries = browse_svc.get_all_video_entries_in_directory(
+    entries = await browse_svc.get_all_video_entries_in_directory(
         root_fs, "Test-category", search_operator=lambda entry: None,
     )
 
     assert sorted(e.name for e in entries) == ["movie_a.mp4", "movie_b.mp4", "movie_c.mp4"]
 
 
-def test_a_rejected_entry_does_not_stop_the_recursion(
+async def test_a_rejected_entry_does_not_stop_the_recursion(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     """
@@ -110,14 +110,14 @@ def test_a_rejected_entry_does_not_stop_the_recursion(
     """
     root_fs = str(local_resource_dir).replace("\\", "/")
 
-    entries = browse_svc.get_all_video_entries_in_directory(
+    entries = await browse_svc.get_all_video_entries_in_directory(
         root_fs, "Test-category", search_operator=lambda entry: entry.name == "movie_c.mp4",
     )
 
     assert [e.name for e in entries] == ["movie_c.mp4"]
 
 
-def test_operator_is_consulted_for_video_files_only(
+async def test_operator_is_consulted_for_video_files_only(
     browse_svc, local_resource_handler_service, local_resource_dir: Path,
 ):
     """
@@ -133,7 +133,7 @@ def test_operator_is_consulted_for_video_files_only(
         asked.append(entry.name)
         return True
 
-    browse_svc.get_all_video_entries_in_directory(
+    await browse_svc.get_all_video_entries_in_directory(
         root_fs, "Test-category", search_operator=record,
     )
 

@@ -1,17 +1,27 @@
-from contextlib import contextmanager
-from typing import AsyncIterator, Generator, Iterator
+import asyncio
 import os
+import shutil
+from contextlib import suppress
+from stat import S_ISDIR
+from typing import AsyncIterator
+from uuid import uuid4
+
 import aiofiles
+
 from src.config import get_settings
+from src.logger import get_logger
 from src.platform.storage.base_resource_handler import BaseResourceHandler, HandlerBuildSpec
-from src.platform.storage.base_file_entry import BaseFileEntry
-from src.platform.storage.local_fs.local_fs_file_entry import LocalFSFileEntry
+from src.platform.storage.file_info import FileInfo
+
+logger = get_logger("local_fs_handler")
 
 
 class LocalFSResourceHandler(BaseResourceHandler):
     """Resource handler for local filesystem operations."""
 
     storage_type = "local_fs"
+
+    moves_without_copying = True
 
     @classmethod
     def from_config(cls, spec: HandlerBuildSpec) -> "LocalFSResourceHandler":
@@ -31,38 +41,92 @@ class LocalFSResourceHandler(BaseResourceHandler):
 
     # --- IO operations ---
 
-    @contextmanager
-    def list_directory(self, path: str) -> Generator[Iterator[BaseFileEntry], None, None]:
+    def _scan(self, path: str) -> list[FileInfo]:
+        """List one directory and stat every entry in it, all on the calling thread."""
+        infos: list[FileInfo] = []
         with os.scandir(path) as entries:
-            yield (LocalFSFileEntry(dir_entry=entry) for entry in entries)
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir()
+                    entry_stat = entry.stat()
+                except OSError as e:
+                    # Gone between the listing and the stat, or unreadable: the rest of
+                    # the directory is still worth reporting.
+                    logger.warning(f"Skipping unreadable entry {entry.path}: {e}")
+                    continue
+                infos.append(FileInfo(
+                    name=entry.name,
+                    path=self.get_path_standard_format(entry.path),
+                    is_dir=is_dir,
+                    size=0.0 if is_dir else entry_stat.st_size,
+                    mtime=entry_stat.st_mtime,
+                ))
+        return infos
 
-    def get_entry(self, path: str) -> BaseFileEntry:
-        """Get a single entry by path using pathlib."""
-        return LocalFSFileEntry(file_path=path)
+    async def list_directory(self, path: str) -> list[FileInfo]:
+        return await asyncio.to_thread(self._scan, path)
 
-    def file_exists(self, path: str) -> bool:
-        return os.path.exists(path)
+    async def walk(self, path: str) -> AsyncIterator[list[FileInfo]]:
+        """One batch per directory. Only the root failing is an error: an unreadable
+        sub-directory is logged and skipped, so one bad folder does not hide a tree."""
+        pending = [path]
+        while pending:
+            current = pending.pop()
+            try:
+                batch = await asyncio.to_thread(self._scan, current)
+            except OSError as e:
+                if current is path:
+                    raise
+                logger.warning(f"Skipping unreadable directory {current}: {e}")
+                continue
+            pending.extend(info.path for info in batch if info.is_dir)
+            if batch:
+                yield batch
 
-    def delete_file(self, path: str) -> None:
-        os.remove(path)
+    def _stat(self, path: str) -> FileInfo | None:
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        is_dir = S_ISDIR(st.st_mode)
+        standard = self.get_path_standard_format(path)
+        return FileInfo(
+            name=standard.rsplit("/", 1)[-1],
+            path=standard,
+            is_dir=is_dir,
+            size=0.0 if is_dir else st.st_size,
+            mtime=st.st_mtime,
+        )
 
-    def create_directory(self, path: str) -> None:
+    async def stat(self, path: str) -> FileInfo | None:
+        return await asyncio.to_thread(self._stat, path)
+
+    async def delete_file(self, path: str) -> None:
+        await asyncio.to_thread(os.remove, path)
+
+    async def create_directory(self, path: str) -> None:
         """``os.makedirs`` already raises FileExistsError for an occupied path, file included."""
-        os.makedirs(path)
+        await asyncio.to_thread(os.makedirs, path)
 
-    def delete_directory(self, path: str) -> None:
+    async def delete_directory(self, path: str) -> None:
         """``os.rmdir`` already refuses anything but an empty directory."""
-        os.rmdir(path)
+        await asyncio.to_thread(os.rmdir, path)
 
-    def is_directory_empty(self, path: str) -> bool:
-        with os.scandir(path) as entries:
-            return next(entries, None) is None
+    async def is_directory_empty(self, path: str) -> bool:
+        def _is_empty() -> bool:
+            with os.scandir(path) as entries:
+                return next(entries, None) is None
 
-    def get_size(self, path: str) -> float:
-        """get size of file directly via os.path to avoid unnecessary FileEntry creation"""
-        return os.path.getsize(path)
+        return await asyncio.to_thread(_is_empty)
 
     # --- File content read/write ---
+
+    async def read_file(self, path: str) -> bytes | None:
+        try:
+            async with aiofiles.open(path, "rb") as f:
+                return await f.read()
+        except FileNotFoundError:
+            return None
 
     async def read_file_chunk(self, path: str, offset: int, length: int) -> bytes:
         async with aiofiles.open(path, "rb") as f:
@@ -70,12 +134,12 @@ class LocalFSResourceHandler(BaseResourceHandler):
             return await f.read(length)
 
     async def write_file(self, path: str, data: bytes) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        await asyncio.to_thread(os.makedirs, os.path.dirname(path), exist_ok=True)
         async with aiofiles.open(path, "wb") as f:
             await f.write(data)
 
     async def write_file_streaming(self, path: str, data_stream: AsyncIterator[bytes]) -> int:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        await asyncio.to_thread(os.makedirs, os.path.dirname(path), exist_ok=True)
         total_written = 0
         async with aiofiles.open(path, "wb") as f:
             async for chunk in data_stream:
@@ -83,10 +147,53 @@ class LocalFSResourceHandler(BaseResourceHandler):
                 total_written += len(chunk)
         return total_written
 
-    def get_available_space(self, path: str) -> int | None:
-        import shutil
+    def _link(self, source: str, target: str) -> bool:
         try:
-            usage = shutil.disk_usage(os.path.dirname(path))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            os.link(source, target)
+        except FileExistsError:
+            # A caller told "no" would copy onto the target, and writing through a link
+            # left by an earlier attempt empties the source itself.
+            return os.path.samefile(source, target)
+        except OSError as e:
+            # Only the OS knows: two bind mounts can report one st_dev and still refuse.
+            logger.info(f"Cannot link {source} to {target}: {e}")
+            return False
+        return True
+
+    async def link_file(self, source: str, target: str) -> bool:
+        return await asyncio.to_thread(self._link, source, target)
+
+    def _can_rename(self, source: str, target: str) -> bool:
+        name = f".rename-probe-{uuid4().hex}.part"
+        probe = os.path.join(os.path.dirname(source), name)
+        landed = os.path.join(os.path.dirname(target), name)
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            open(probe, "xb").close()
+        except OSError as e:
+            logger.info(f"Cannot probe a rename from {source} to {target}: {e}")
+            return False
+        try:
+            os.rename(probe, landed)
+        except OSError as e:
+            logger.info(f"Cannot rename from {source} to {target}: {e}")
+            with suppress(OSError):
+                os.remove(probe)
+            return False
+        with suppress(OSError):
+            os.remove(landed)
+        return True
+
+    async def can_rename(self, source: str, target: str) -> bool:
+        return await asyncio.to_thread(self._can_rename, source, target)
+
+    async def replace_file(self, staged: str, target: str) -> None:
+        await asyncio.to_thread(os.replace, staged, target)
+
+    async def get_available_space(self, path: str) -> int | None:
+        try:
+            usage = await asyncio.to_thread(shutil.disk_usage, os.path.dirname(path))
             return usage.free
         except OSError:
             return None

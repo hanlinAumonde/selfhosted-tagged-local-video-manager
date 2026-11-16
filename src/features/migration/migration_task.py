@@ -1,5 +1,6 @@
 from typing import Optional
 import pymongo
+from beanie import PydanticObjectId
 from pymongo import IndexModel
 
 from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
@@ -24,6 +25,19 @@ class MigrationTaskModel(BaseTaskModel):
     # Conflict resolution
     conflict_strategy: Optional[str] = None
     renamed_target_path: Optional[str] = None
+
+    # The file stays at the source until the database phase renames it. Stored because a
+    # replay of that phase in a new process cannot tell this from the state the world is in.
+    move_by_rename: bool = False
+
+    # Set on the children of a batch migration (see ``migration_batch``); None for a
+    # migration started on its own.
+    batch_id: Optional[PydanticObjectId] = None
+
+    @property
+    def final_target_path(self) -> str:
+        """DB-format path the file ends up at, after any rename for a name conflict."""
+        return self.renamed_target_path or self.target_path
 
     def get_progress(self) -> tuple[int, int]:
         """
@@ -51,13 +65,14 @@ class MigrationTaskModel(BaseTaskModel):
             [("created_at", pymongo.DESCENDING)],
             [("source_path", pymongo.ASCENDING)],
             [("target_path", pymongo.ASCENDING)],
+            [("batch_id", pymongo.ASCENDING), ("status", pymongo.ASCENDING)],
             IndexModel(
                 [("source_path", pymongo.ASCENDING)],
                 unique=True,
                 partialFilterExpression={
                     "status": {"$in": [
                         "PENDING", "PROCESSING", "PROCESS_DONE",
-                        "UPDATING_DB", "DB_UPDATED", "DELETING_SOURCE",
+                        "COMMITTING", "COMMITTED", "CLEANING_UP",
                     ]}
                 },
             ),
@@ -67,7 +82,7 @@ class MigrationTaskModel(BaseTaskModel):
                 partialFilterExpression={
                     "status": {"$in": [
                         "PENDING", "PROCESSING", "PROCESS_DONE",
-                        "UPDATING_DB", "DB_UPDATED", "DELETING_SOURCE",
+                        "COMMITTING", "COMMITTED", "CLEANING_UP",
                     ]}
                 },
             ),

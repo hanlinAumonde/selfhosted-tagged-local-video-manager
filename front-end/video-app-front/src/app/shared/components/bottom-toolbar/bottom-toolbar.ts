@@ -10,11 +10,13 @@ import { MatTooltipModule } from "@angular/material/tooltip";
 import { DeleteCheckPanel } from '../delete-check-panel/delete-check-panel';
 import { NewFolderPanel } from '../new-folder-panel/new-folder-panel';
 import { SearchPanel } from '../search-panel/search-panel';
+import { MigrationPanel } from '../migration-panel/migration-panel';
 import {
   BatchPanelVideoItem,
   DeleteCheckPanelData,
   DeleteType,
   DirectorySearchCriteria,
+  MigrationPanelData,
   NewFolderPanelData,
   SearchPanelData
 } from '../../models/panels.model';
@@ -47,6 +49,7 @@ export class BottomToolbar {
 
   batchOperationResult = output<boolean>();
   createFolderResult = output<boolean>();
+  migrationResult = output<boolean>();
   navigateToPath = output<string[]>();
   searchRequested = output<DirectorySearchCriteria>();
   exitSearch = output<void>();
@@ -239,6 +242,26 @@ export class BottomToolbar {
 
     dialogRef.afterClosed().subscribe(result => {
       this.batchOperationResult.emit(result? true : false);
+    });
+  }
+
+  openMigrationPanel() {
+    const videos = this.selectedVideoItems()
+      .map(item => ({ id: item.id, name: item.name, size: item.size ?? 0 }));
+    if (videos.length === 0) return;
+
+    this.toastService.clearAllToasts();
+
+    const dialogRef = this.dialog.open(MigrationPanel, {
+      width: '560px',
+      data: {
+        videos,
+        sourceCurrentDir: this.currentPath().join('/') || '/',
+      } as MigrationPanelData,
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      this.migrationResult.emit(!!result);
     });
   }
 
