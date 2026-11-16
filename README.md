@@ -19,7 +19,7 @@ English | [中文](README.cn.md)
 
 Video App is a full-stack application for managing, browsing and playing your own video library. Point it at existing directories or S3 buckets in the configuration and it scans them, generates thumbnails, and lets you manage metadata — titles, authors, tags, series, favourites — through a web UI.
 
-Storage sits behind a strategy interface, so a local disk and an S3-compatible bucket (MinIO, RustFS, …) are browsed, played and migrated the same way. Long-running work such as file migration runs in a process-wide worker pool fully decoupled from client connections: closing the tab never interrupts a task, and a task left unfinished by a restart resumes from the phase it stopped at.
+Storage sits behind a strategy interface, so a local disk and an S3-compatible bucket (MinIO, RustFS, …) are browsed, played and migrated the same way. Long-running work such as file migration runs in a separate worker process, fed through a Redis Stream queue and fully decoupled from client connections: closing the tab or restarting the web backend never interrupts a task, and a task left unfinished by a worker restart resumes from the phase it stopped at.
 
 ## Architecture
 
@@ -113,7 +113,9 @@ platform/              storage · media · cache · jobs (reusable, knows no fea
 
 - **Preflight checks** — source exists, free space, name conflicts, active tasks, same-location detection — with `rename` / `overwrite` / `skip` conflict strategies.
 - **Three-phase state machine** — copy, repoint the database, clean up the source — with a crash-recovery matrix that resumes from the phase a restart interrupted rather than starting over.
-- **Tasks outlive connections** — migrations run in a worker pool sized by `tasks.max_concurrent`. Subscribing never starts a task and unsubscribing never stops one, so refreshing the page or watching from several tabs is safe.
+- **No needless copying inside one storage** — a move within one local filesystem is a hard link (or a rename where links are unsupported), and a move within one S3 bucket is copied by the server in parts (UploadPartCopy), so the bytes never pass through the worker. Anything else — across categories, buckets or volumes — is streamed.
+- **Tasks outlive connections and restarts** — migrations run in their own worker process (Taskiq over a Redis Stream); the web process only queues them and relays their progress from Redis Pub/Sub. Subscribing never starts a task and unsubscribing never stops one, so refreshing the page, watching from several tabs, or restarting the backend is safe.
+- **Copy slots per device** — `tasks.max_concurrent` caps copies in total, `tasks.slots_per_device` caps them per disk or bucket, so two copies never thrash the same spinning disk while copies between idle devices still run.
 - **Migration locks propagate** — every query returning a video fills an `isLocked` flag in one batched lookup, and the UI disables every entry point for locked rows. Each mutation re-checks independently, so bypassing the UI is refused too.
 
 ### Storage Abstraction
@@ -188,7 +190,15 @@ uv sync
 uv run main.py
 ```
 
-The backend runs at `http://localhost:12000`.
+The backend runs at `http://localhost:12000`. It needs Redis (`REDIS_URL`) for the task queues even when the cache uses `cachetools`.
+
+**Migration worker** (a second terminal; migrations stay queued until it runs):
+
+```bash
+uv run taskiq worker src.worker:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
+```
+
+Run exactly one worker process (`--workers 1`): on startup it treats every unfinished migration as its own orphan and resumes it.
 
 **Frontend:**
 
@@ -216,7 +226,7 @@ The frontend runs at `http://localhost:4200`.
 
 ## Docker Deployment
 
-Docker Compose orchestrates four services: the Angular frontend (Nginx), the FastAPI backend, MongoDB, and RustFS as S3-compatible storage. Data is persisted through bind mounts, so `docker-compose down` does not lose it.
+Docker Compose orchestrates the Angular frontend (Nginx), the FastAPI backend, the migration worker, MongoDB, Redis, and RustFS as S3-compatible storage. The backend and the worker share one image and one configuration block (a YAML anchor), so a mount is declared once. Data is persisted through bind mounts, so `docker-compose down` does not lose it.
 
 ### 1. Prerequisites
 
@@ -258,6 +268,9 @@ docker-compose ps
 # Backend logs
 docker-compose logs -f backend
 
+# Migration worker logs
+docker-compose logs -f worker-migration
+
 # Rebuild and redeploy after pulling new code
 docker-compose up -d --build
 
@@ -283,11 +296,12 @@ video-app/
 ├── config.yaml                      # Configuration (envyaml syntax, values from .env)
 ├── .env.example                     # Every environment variable, documented; copy to .env
 ├── Dockerfile                       # Backend image
-├── docker-compose.yml               # frontend + backend + MongoDB + Redis + RustFS
+├── docker-compose.yml               # frontend + backend + worker-migration + MongoDB + Redis + RustFS
 ├── pyproject.toml                   # Dependencies and metadata
 │
 ├── src/
-│   ├── app.py                       # App factory: logging, Mongo, TaskRunner boot, CORS, routers
+│   ├── app.py                       # App factory: logging, Mongo, task queues + progress bus, CORS, routers
+│   ├── worker.py                    # Migration worker's assembly root (taskiq entry: create_broker)
 │   ├── config.py                    # Settings (Pydantic + envyaml), handler config union
 │   ├── context.py                   # DI container: 13 services + path-lock registry
 │   ├── errors.py                    # Custom exceptions
@@ -311,7 +325,8 @@ video-app/
 │   │       ├── task_model.py        # TaskStatus + BaseTaskModel (progress via accessors)
 │   │       ├── progress.py          # ProgressFrame — unit-agnostic current/total
 │   │       ├── state_machine.py     # TaskStateMachine[TTask] — 3 phases, crash recovery
-│   │       ├── task_runner.py       # FIFO queue, worker pool, progress broadcast
+│   │       ├── dispatch.py          # One Redis Stream broker per queue, submit, reconcile, recover
+│   │       ├── progress_bus.py      # Redis Pub/Sub: worker publishes, web fans out to observers
 │   │       └── path_locks.py        # PathLockRegistry — "is this path busy?"
 │   │
 │   ├── features/                    # ── Business capabilities ──
@@ -347,7 +362,7 @@ video-app/
 │   ├── conftest.py                  # test_settings, MongoDB, document factories
 │   ├── unit/                        # Mirrors src/
 │   │   ├── test_architecture.py     # Dependency-direction guards (AST scan)
-│   │   ├── test_context_wiring.py · test_task_runner_bootstrap.py
+│   │   ├── test_context_wiring.py · test_worker.py
 │   │   ├── platform/                # cache · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
 │   │   └── schema/                  # Pydantic input contracts
@@ -388,7 +403,7 @@ video-app/
             └── environments/
 ```
 
-> **Adding a background task type**: subclass `BaseTaskModel` (declaring its own `Settings.name`) and `TaskStateMachine[YourModel]`, implement the three phases, then register it with `TaskRunner.register_executor(key, executor)`. The scheduler needs no changes — a test drives a non-migration task type through the template to prove it.
+> **Adding a background task type**: subclass `BaseTaskModel` (declaring its own `Settings.name`) and `TaskStateMachine[YourModel]`, implement the three phases, then give it a queue in `dispatch.Queue` and a worker assembly root like `src/worker.py`. The template and the dispatcher need no changes — tests drive a non-migration task type through both to prove it.
 
 > **Adding a storage backend**: declare `storage_type` on the handler, implement `from_config(spec)`, add it to `_HANDLER_TYPES`, and add a category config model to the `HandlerConfig` union. `_create_handler` does not change, and two guard tests pin the two registrations to each other.
 
@@ -470,12 +485,24 @@ validation:
   series_name_max_length: 100
 
 tasks:
-  max_concurrent: 2              # Concurrent tasks; also the worker pool size. Migrations
-                                 # are IO-bound, so a high value mostly makes them compete
-                                 # for bandwidth.
-  progress_flush_interval: 3.0   # Seconds between progress writes to MongoDB. Live progress
-                                 # is held in memory, so this only bounds how stale the task
-                                 # list looks to a client with no active subscription.
+  redis_url: $REDIS_URL|redis://localhost:6379/0
+                                 # Task queues and progress frames between the web process
+                                 # and the workers.
+  max_concurrent: 4              # Migrations copying at once, across every device.
+  slots_per_device:              # Copies at once on ONE device, by storage type. Several
+    local_fs: 1                  # copies on one spinning disk are slower in total than one.
+    s3: 2
+  devices: {}                    # "<category>/<pseudo_name>": device name. Mounts on the same
+                                 # physical disk must share a name, or they are throttled as
+                                 # separate disks.
+  device_limits: {}              # Device name: copies at once, overriding slots_per_device —
+                                 # e.g. "ssd-1: 4" for a solid-state disk declared in devices.
+  progress_flush_interval: 1.0   # Seconds between progress writes to MongoDB; also bounds how
+                                 # long a cancel takes to reach a running task.
+  observe_watchdog_interval: 10.0  # Seconds without a frame before a subscription checks the
+                                 # DB (a crashed worker sends no final frame).
+  reconcile_interval: 300.0      # Seconds between re-sends of PENDING tasks whose message may
+                                 # have been lost with Redis.
 
 logging:
   log_dir: logs
