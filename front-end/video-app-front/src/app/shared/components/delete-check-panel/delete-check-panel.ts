@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnDestroy, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { 
   MAT_DIALOG_DATA, 
@@ -34,22 +34,15 @@ import { ToastType } from '../../models/toast.model';
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './delete-check-panel.html',
 })
-export class DeleteCheckPanel implements OnDestroy {
+export class DeleteCheckPanel {
   readonly dialogRef = inject(MatDialogRef<DeleteCheckPanel>);
   readonly data = inject<DeleteCheckPanelData>(MAT_DIALOG_DATA);
   private gqlService = inject(GqlService);
   private toastService = inject(ToastService);
   private videoUpdateEventService = inject(VideoUpdateEventService);
-  private gqlRequest$!: Observable<any>;
 
   processingMessage = signal<string>("");
   isSaving = signal<boolean>(false);
-
-  ngOnDestroy(): void {
-    if(this.gqlRequest$) {
-      this.gqlRequest$.subscribe().unsubscribe();
-    }
-  }
 
   readonly isDirectoryDelete = this.data.deleteType === DeleteType.Directory;
   readonly KeepFolder = DirectoryDeletionStrategy.KeepFolder;
@@ -81,12 +74,17 @@ export class DeleteCheckPanel implements OnDestroy {
       this.dialogRef.close(false);
       return;
     }
+    /*
+      Not cancelled when the panel goes away: a deletion the user confirmed should finish
+      and be announced, so the listings drop what it removed.
+    */
+    let gqlRequest$: Observable<unknown> | undefined;
     switch(type){
       case DeleteType.Single:
-        this.gqlRequest$ = this.processDeletionMutation();
+        gqlRequest$ = this.processDeletionMutation();
         break;
       case DeleteType.Batch:
-        this.gqlRequest$ = this.processBatchDeletion(
+        gqlRequest$ = this.processBatchDeletion(
           this.gqlService.batchDeleteVideosSubscription(
           { 
             videoIds: this.data.videoIds ? Array.from(this.data.videoIds) : [],
@@ -95,7 +93,7 @@ export class DeleteCheckPanel implements OnDestroy {
         );
         break;
       case DeleteType.Directory:
-        this.gqlRequest$ = this.processBatchDeletion(
+        gqlRequest$ = this.processBatchDeletion(
           this.gqlService.batchDeleteVideosSubscription(
           {
             videoIds: [],
@@ -105,14 +103,14 @@ export class DeleteCheckPanel implements OnDestroy {
         );
         break;
     }
-    if(!this.gqlRequest$) {
+    if(!gqlRequest$) {
       this.toastService.emitNewToast(
         'No deletion operation specified.', ToastType.Error
       );
       this.dialogRef.close(false);
       return;
     }
-    this.gqlRequest$.subscribe({
+    gqlRequest$.subscribe({
       error: (err) => {
         this.isSaving.set(false);
         this.toastService.emitNewToast(
@@ -148,7 +146,13 @@ export class DeleteCheckPanel implements OnDestroy {
     return gqlRequest$.pipe(
       tap(
         result => {
-          if(result.data?.result?.resultType === undefined && result.data?.status){
+          if(!result.data){
+            // GqlService turns a failed request into an empty result; without this the
+            // panel would wait on a stream that has already ended.
+            this.isSaving.set(false);
+            this.toastService.emitNewToast('Batch delete failed. Please try again.', ToastType.Error);
+            this.dialogRef.close(false);
+          }else if(result.data.result?.resultType === undefined && result.data.status){
             this.processingMessage.set(result.data.status);
           }else if(result.data?.result?.resultType){
             this.isSaving.set(false);

@@ -169,7 +169,8 @@ export class BatchOperationPanel {
     }
     const existing = this.existingSeriesNames();
     if (existing.length === 0) return 'None of the selected videos belong to a series.';
-    return `Selected videos span ${existing.length} series (${existing.join(', ')}) and videos with none.`;
+    const someHaveNone = items.some(item => !item.seriesName);
+    return `Selected videos span ${existing.length} series (${existing.join(', ')})${someHaveNone ? ' and videos with none' : ''}.`;
   });
 
   /** True while the panel is reordering the series the selection already shares. */
@@ -293,6 +294,12 @@ export class BatchOperationPanel {
                 this.toastService.emitNewToast(
                   'All selected videos are already up to date. No changes were made.',
                   ToastType.Warning
+                );
+                break;
+              case BatchResultType.Failure:
+                this.toastService.emitNewToast(
+                  `Batch update failed: ${result.data.result.message ?? 'No additional information provided.'}`,
+                  ToastType.Error
                 );
                 break;
             }

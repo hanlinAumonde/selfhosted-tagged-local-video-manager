@@ -47,7 +47,7 @@ export class Sidebar {
   ];
 
   onNavItemClick() {
-    this.stateService.clearAllStates(false);
+    this.stateService.clearAllTabStates();
   }
   
   scrollTo(position: number) {

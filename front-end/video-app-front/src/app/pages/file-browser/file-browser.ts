@@ -12,7 +12,8 @@ import {
   ManagementRefreshState,
   FileBrowserViewMode,
   comparatorBySortOption,
-  isNodeLocked
+  isNodeLocked,
+  selectableVideoIds,
 } from '../../shared/models/management.model';
 import { BottomToolbar } from '../../shared/components/bottom-toolbar/bottom-toolbar';
 import { FileBrowseTable } from '../../shared/components/file-browse-table/file-browse-table';
@@ -370,15 +371,9 @@ export class FileBrowser implements OnDestroy{
     const contents = this.directoryContents().data;
     if (!contents) return;
 
-    const selectableItems = contents.filter(item => !item.node.isDir);
-    const allSelected = selectableItems.length > 0
-      && selectableItems.every(item => this.selectedIds().has(item.node.id));
-
-    if (allSelected) {
-      this.selectedIds.set(new Set());
-    } else {
-      this.selectedIds.set(new Set(selectableItems.map(item => item.node.id)));
-    }
+    const selectable = selectableVideoIds(contents);
+    const allSelected = selectable.length > 0 && selectable.every(id => this.selectedIds().has(id));
+    this.selectedIds.set(allSelected ? new Set() : new Set(selectable));
   }
 
   // ─── Sorting ───────────────────────────────────────────────────────

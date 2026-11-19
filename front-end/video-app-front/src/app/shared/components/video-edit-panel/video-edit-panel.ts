@@ -10,7 +10,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, Subscription } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { SearchField, SeriesFieldInput, SeriesOrderEntryInput } from '../../../core/graphql/generated/graphql';
 import {
@@ -102,6 +102,11 @@ export class VideoEditPanel {
   */
   private committedSeriesName = signal<string | null>(null);
   isLoadingSeriesMembers = signal<boolean>(false);
+  /*
+    The members being fetched belong to the committed name. Once the user departs from it
+    they are stale, and letting them land would file a whole other series under the new name.
+  */
+  private membersSubscription?: Subscription;
 
   currentVideoId = computed(() => this.video()?.id ?? null);
 
@@ -128,6 +133,7 @@ export class VideoEditPanel {
       // Only a committed name can be departed from; a blank slate has nothing to reset.
       if (committed === null) return;
       if (typed !== committed) {
+        this.stopLoadingSeriesMembers();
         this.committedSeriesName.set(null);
         this.setSeriesMembers([this.currentVideoAsItem()]);
       }
@@ -145,6 +151,7 @@ export class VideoEditPanel {
   onModifySeriesToggle(checked: boolean) {
     if (!checked) {
       // Revert any staged changes.
+      this.stopLoadingSeriesMembers();
       this.committedSeriesName.set(null);
       this.model.update(current => ({
         ...current,
@@ -193,9 +200,15 @@ export class VideoEditPanel {
     };
   }
 
+  private stopLoadingSeriesMembers() {
+    this.membersSubscription?.unsubscribe();
+    this.isLoadingSeriesMembers.set(false);
+  }
+
   private loadSeriesMembers(name: string) {
+    this.membersSubscription?.unsubscribe();
     this.isLoadingSeriesMembers.set(true);
-    this.gqlService.getSeriesVideosQuery(name)
+    this.membersSubscription = this.gqlService.getSeriesVideosQuery(name)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

@@ -19,8 +19,6 @@ interface ThumbnailSlots {
 
 /** One cap for every tab of this origin, kept by the browser's lock manager. */
 class CrossTabSlots implements ThumbnailSlots {
-    private nextSlot = 0;
-
     constructor(private locks: LockManager) {}
 
     async acquire(signal: AbortSignal): Promise<Release> {
@@ -29,10 +27,32 @@ class CrossTabSlots implements ThumbnailSlots {
             if (release) return release;
         }
         signal.throwIfAborted();
-        // All taken: queue on one slot. Rotating keeps one busy slot from collecting
-        // every waiter while the others free up.
-        const release = await this.hold(slotName(this.nextSlot++ % THUMBNAIL_SLOTS), { signal });
-        return release!;
+        return this.holdFirstFreed(signal);
+    }
+
+    /*
+      All taken: queue on every slot and keep whichever frees first. Queueing on just one
+      would leave this waiting behind a slow thumbnail while another slot sits idle.
+    */
+    private holdFirstFreed(signal: AbortSignal): Promise<Release> {
+        const withdraw = new AbortController();
+        signal.addEventListener("abort", () => withdraw.abort(signal.reason), { once: true });
+        let granted = false;
+
+        return new Promise((resolve, reject) => {
+            for (let i = 0; i < THUMBNAIL_SLOTS; i++) {
+                this.locks.request(slotName(i), { signal: withdraw.signal }, (): Promise<void> | undefined => {
+                    // A second slot granted before the others were withdrawn goes straight back.
+                    if (granted) return undefined;
+                    granted = true;
+                    withdraw.abort();
+                    return new Promise<void>(release => resolve(() => release()));
+                }).catch(error => {
+                    // The withdrawn losers reject too; only the caller's own abort is an error.
+                    if (signal.aborted) reject(error);
+                });
+            }
+        });
     }
 
     /** A lock is held until its callback's promise settles, so that promise is the release. */
