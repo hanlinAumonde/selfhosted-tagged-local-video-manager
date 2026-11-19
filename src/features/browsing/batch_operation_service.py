@@ -130,6 +130,7 @@ class BatchOperationService:
 
         selected_count = len(videoIds) if videoIds else len(fileEntries or [])
         deleted_count = 0
+        actually_deleted: list[VideoModel] = []
 
         try:
             if videoIds:
@@ -172,9 +173,14 @@ class BatchOperationService:
                 await self._remove_videos_and_update_tags(actually_deleted, category)
                 deleted_count = result.deleted_count
 
-            if directoryDeletion is None:
-                await self.dirMetadataService.update_directory_metadata_forward(dir_path)
-            else:
+            # The selection can reach below dir_path (directory search results, or a
+            # "Delete all" walking the tree), so every directory that lost a video is redone.
+            handler = self.resourceHandlerService.get_handler(category)
+            touched_dirs = {handler.dirname(video.path) for video in actually_deleted}
+            touched_dirs.add(dir_path.DB_format_path())
+            await self.dirMetadataService.batch_update_metadata_forward(category, list(touched_dirs))
+
+            if directoryDeletion is not None:
                 async for progress in self._settle_directory(dir_path, directoryDeletion):
                     yield progress
 
@@ -253,7 +259,6 @@ class BatchOperationService:
             # It holds nothing now, and a directory holding nothing is hidden unless
             # something says a user wants it there. This is that something.
             await self.dirMetadataService.mark_user_created(category, db_path)
-            await self.dirMetadataService.update_directory_metadata_forward(dir_path)
             yield self.constructBatchOperationStatus(status="Kept the folder")
             return
 
