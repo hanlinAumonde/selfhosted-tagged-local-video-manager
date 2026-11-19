@@ -10,29 +10,12 @@ import { environment } from '../environments/environment';
 import { routes } from './app.routes';
 import { HttpLink } from 'apollo-angular/http';
 import { ApolloLink, InMemoryCache } from '@apollo/client';
+import { APOLLO_DEFAULT_OPTIONS } from './core/graphql/apollo-default-options';
 import { ImageRequestInterceptor } from './shared/interceptor/ImageRequest.interceptor';
 import { createClient } from 'graphql-ws';
 import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { Kind, OperationTypeNode } from 'graphql';
-
-// Apollo Client derives result types from the default errorPolicy, so the `defaultOptions` below
-// must be declared here too; otherwise results would be typed as if errors always throw.
-declare module '@apollo/client' {
-  export namespace ApolloClient {
-    export namespace DeclareDefaultOptions {
-      interface WatchQuery {
-        errorPolicy: 'all';
-      }
-      interface Query {
-        errorPolicy: 'all';
-      }
-      interface Mutate {
-        errorPolicy: 'all';
-      }
-    }
-  }
-}
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -79,22 +62,7 @@ export const appConfig: ApplicationConfig = {
             },
           },
         }),
-        defaultOptions: {
-          watchQuery: {
-            fetchPolicy: 'cache-and-network', 
-            errorPolicy: 'all',
-          },
-          query: {
-            fetchPolicy: 'network-only',
-            errorPolicy: 'all',
-          },
-          mutate: {
-            errorPolicy: 'all',
-          },
-          subscribe: {
-            errorPolicy: 'all',
-          }
-        },
+        defaultOptions: APOLLO_DEFAULT_OPTIONS,
       };
     }),
   ],
