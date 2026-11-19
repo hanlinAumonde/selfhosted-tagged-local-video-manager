@@ -10,24 +10,12 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from taskiq import InMemoryBroker
 
-from src.platform.jobs.dispatch import RUN_TASK, Queue, TaskDispatcher, build_broker
+from src.platform.jobs.dispatch import Queue, TaskDispatcher, build_broker
 from src.platform.jobs.task_model import TaskStatus
+from tests.broker_helpers import RecordingBroker
 from tests.unit.platform.jobs.reindex import ReindexStateMachine, ReindexTaskModel
 
 pytestmark = pytest.mark.unit
-
-
-class _RecordingBroker(InMemoryBroker):
-    """A real taskiq broker whose worker side just writes down the ids it receives."""
-
-    def __init__(self):
-        super().__init__(await_inplace=True)
-        self.delivered: list[str] = []
-
-        async def run_task(task_id: str) -> None:
-            self.delivered.append(task_id)
-
-        self.register_task(run_task, task_name=RUN_TASK)
 
 
 class _UnreachableBroker(InMemoryBroker):
@@ -36,8 +24,8 @@ class _UnreachableBroker(InMemoryBroker):
 
 
 @pytest.fixture
-def broker() -> _RecordingBroker:
-    return _RecordingBroker()
+def broker() -> RecordingBroker:
+    return RecordingBroker()
 
 
 @pytest.fixture

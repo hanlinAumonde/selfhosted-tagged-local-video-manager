@@ -20,7 +20,8 @@ from tests.unit.features.migration.batch_helpers import (
     make_batch,
     record_directory_refreshes,
 )
-from tests.unit.test_worker import _RecordingBroker, redis, worker_factory  # noqa: F401  (fixtures)
+from tests.broker_helpers import RecordingBroker
+from tests.unit.test_worker import redis, worker_factory  # noqa: F401  (fixtures)
 
 pytestmark = pytest.mark.unit
 
@@ -153,7 +154,7 @@ class TestHandOffToTheNextChild:
         a = await add_child(task_factory, batch, "movie_a")
         b = await add_child(task_factory, batch, "movie_b")
         c = await add_child(task_factory, batch, "movie_c", sub_dir="subdir/")
-        broker = _RecordingBroker()
+        broker = RecordingBroker()
         worker = worker_factory(broker=broker)
         release = _block_copies(worker, {"movie_b"})
 
@@ -183,7 +184,7 @@ class TestHandOffToTheNextChild:
         batch = await make_batch()
         cancelled = await add_child(task_factory, batch, "movie_a", TaskStatus.CANCELLED)
         pending = await add_child(task_factory, batch, "movie_b")
-        broker = _RecordingBroker()
+        broker = RecordingBroker()
         worker = worker_factory(broker=broker)
 
         await worker.run(str(cancelled.id))
