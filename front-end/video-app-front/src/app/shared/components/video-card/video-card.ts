@@ -1,27 +1,20 @@
-import { Component, computed, effect, inject, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { SearchedVideo } from '../../models/GQL-result.model';
-import { HttpClientService } from '../../../services/Http-client-service/Http-client.service';
+import { FileThumbnail } from '../file-thumbnail/file-thumbnail';
 
 @Component({
   selector: 'app-video-card',
-  imports: [RouterLink, MatCardModule, MatChipsModule, MatIconModule, MatTooltipModule],
+  imports: [RouterLink, MatCardModule, MatChipsModule, MatIconModule, MatTooltipModule, FileThumbnail],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './video-card.html',
 })
 export class VideoCard {
   video = input<SearchedVideo | null>(null);
-
-  private httpClientService = inject(HttpClientService);
-
-  readonly defaultThumbnail = '/videoicon.png';
-
-  thumbnailSrc = signal(this.defaultThumbnail);
-  isDefaultThumbnail = signal(true);
 
   /** A video held by a migration task cannot be opened until the task settles. */
   isLocked = computed(() => this.video()?.isLocked ?? false);
@@ -45,31 +38,6 @@ export class VideoCard {
     if (count < 1_000_000) return (count / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
     return (count / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
   });
-
-  constructor() {
-    effect(() => {
-      const video = this.video();
-      if (!video?.id) {
-        this.thumbnailSrc.set(this.defaultThumbnail);
-        this.isDefaultThumbnail.set(true);
-        return;
-      }
-
-      this.httpClientService.getThumbnailUrl(video.id)
-        .subscribe(response => {
-          const blob = response.body;
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            this.thumbnailSrc.set(url);
-            this.isDefaultThumbnail.set(false);
-          } else {
-            this.thumbnailSrc.set(this.defaultThumbnail);
-            this.isDefaultThumbnail.set(true);
-          }
-        }
-      );
-    });
-  }
 
   get formattedDate(): string {
     if (!this.video()) return '';

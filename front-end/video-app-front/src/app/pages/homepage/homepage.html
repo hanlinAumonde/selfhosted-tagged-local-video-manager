@@ -136,7 +136,6 @@
         <a
           [routerLink]="[searchPageApi]"
           [queryParams]="{ currentPageNumber: 1 }"
-          [state]="tagState(tag.name)"
           target="_blank"
           (click)="onTagClick(tag.name)"
           class="px-3 py-1.5 rounded-full dark:bg-stone-800 hover:dark:bg-stone-500 text-white 

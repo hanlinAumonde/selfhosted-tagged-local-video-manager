@@ -215,9 +215,6 @@ export class FileBrowser implements OnDestroy{
             this.directoryContents.set(result);
           }
           this.selectedIds.set(new Set());
-        },
-        error: (err) => {
-          this.toastService.emitNewToast('Failed to load directory: ' + err.message, ToastType.Error);
         }
       });
   }
@@ -273,9 +270,6 @@ export class FileBrowser implements OnDestroy{
               this.migrationTracker.trackTasksInDirectory(this.currentPath().join('/'));
             }
           }
-        },
-        error: (err) => {
-          this.toastService.emitNewToast('Failed to search: ' + err.message, ToastType.Error);
         }
       });
   }
@@ -304,9 +298,6 @@ export class FileBrowser implements OnDestroy{
             return { ...contents, data: updatedData };
           });
         }
-      },
-      error: (err) => {
-        this.toastService.emitNewToast('Failed to refresh directory metadata: ' + err.message, ToastType.Error);
       }
     });
   }
