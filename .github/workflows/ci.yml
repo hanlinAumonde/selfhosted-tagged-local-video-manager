@@ -25,6 +25,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      # Same versions as the image: both install from uv.lock.
       - run: uv sync --locked
       # Integration tests start Mongo and Redis through testcontainers, which uses the
       # runner's own Docker.
