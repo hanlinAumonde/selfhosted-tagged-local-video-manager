@@ -1,0 +1,13 @@
+{
+  "name": "video-app-e2e",
+  "private": true,
+  "scripts": {
+    "stack:up": "docker compose -f ../docker-compose.yml -f docker-compose.e2e.yml -p video-app-e2e --env-file e2e.env up --build --wait",
+    "stack:down": "docker compose -f ../docker-compose.yml -f docker-compose.e2e.yml -p video-app-e2e --env-file e2e.env down -v",
+    "stack:logs": "docker compose -f ../docker-compose.yml -f docker-compose.e2e.yml -p video-app-e2e --env-file e2e.env logs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

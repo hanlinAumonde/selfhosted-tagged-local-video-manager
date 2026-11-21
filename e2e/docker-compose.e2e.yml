@@ -1,0 +1,116 @@
+# e2e stack: the root docker-compose.yml with what only suits a developer's machine
+# replaced. Run it through the npm scripts next to this file (stack:up / stack:down);
+# `down -v` drops the volumes too, so the next run starts clean.
+#
+# Relative paths below resolve against the FIRST -f file's directory, i.e. the
+# repository root, not this one: compose treats every later file that way.
+#
+# The images come from BACKEND_IMAGE / FRONTEND_IMAGE (e2e.env). Built locally for now;
+# a pipeline can point them at the pushed images instead.
+#
+# What changes, and why:
+#   - resources and logs live in volumes the seed service fills, not host directories:
+#     every backend process sees the same files, and a run leaves nothing behind
+#   - Mongo and rustfs keep their data in volumes too, so `down -v` resets them
+#   - no host ports except the frontend's, and no container names, so the stack can run
+#     next to a developer's own
+#   - images are pinned: a run must not pull a different database than the last one
+#   - a crash stays a crash (no restart), so a journey fails instead of retrying blindly
+
+x-e2e-backend: &e2e-backend
+  image: ${BACKEND_IMAGE:?}
+  container_name: !reset null
+  ports: !reset []
+  restart: "no"
+  env_file: !override
+    - e2e/e2e.env
+  volumes: !override
+    - e2e-logs:/app/logs
+    - e2e-resources:/app/resources
+  depends_on:
+    seed:
+      condition: service_completed_successfully
+
+services:
+  seed:
+    image: ${BACKEND_IMAGE:?}
+    # Fresh volumes belong to root; the seed hands them over to the app user.
+    user: "0:0"
+    env_file:
+      - e2e/e2e.env
+    environment:
+      - S3_RESOURCE_1_ENDPOINT_URL=http://rustfs:9000
+    volumes:
+      - ./e2e/seed.py:/seed/seed.py:ro
+      - e2e-logs:/app/logs
+      - e2e-resources:/app/resources
+    command: ["python", "/seed/seed.py"]
+    depends_on:
+      - rustfs
+    networks:
+      - video-app-network
+
+  backend:
+    <<: *e2e-backend
+    healthcheck:
+      # No health route exists; a GraphQL round trip proves startup (Mongo, Redis,
+      # task infrastructure) finished.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(urllib.request.Request('http://localhost:12000/graphql',
+          data=b'{"query":"{__typename}"}', headers={'Content-Type': 'application/json'}), timeout=3)
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  worker-migration:
+    <<: *e2e-backend
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?}
+    container_name: !reset null
+    ports: !override
+      - "${E2E_PORT:?}:80"
+    restart: "no"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.90
+    container_name: !reset null
+    ports: !reset []
+    restart: "no"
+    volumes: !override
+      - e2e-rustfs:/data
+
+  mongodb:
+    image: mongo:8.0.8
+    container_name: !reset null
+    ports: !reset []
+    restart: "no"
+    volumes: !override
+      - e2e-mongodb:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+  redis:
+    image: redis:8.10.3
+    container_name: !reset null
+    ports: !reset []
+    restart: "no"
+
+volumes:
+  e2e-resources:
+  e2e-logs:
+  e2e-mongodb:
+  e2e-rustfs:
