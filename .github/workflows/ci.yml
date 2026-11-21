@@ -70,8 +70,30 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      # Builds the images once; everything after this uses exactly these.
-      - run: npm run stack:up
+      # The images are built once, here; everything after this uses exactly these.
+      # Built outside compose so their layers can be cached between runs: a fresh runner
+      # has no Docker cache of its own. Context and Dockerfile mirror docker-compose.yml.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: ${{ env.BACKEND_IMAGE }}
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: front-end/video-app-front
+          file: front-end/video-app-front/Dockerfile
+          tags: ${{ env.FRONTEND_IMAGE }}
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - run: npm run stack:start
 
       - run: npm test
 
