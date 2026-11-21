@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    # A PR from develop or main brings commits that branch's own pushes already test, so
+    # its PR run would be the same work twice. e2e needs this job, so it is skipped too.
+    if: github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      # Integration tests start Mongo and Redis through testcontainers, which uses the
+      # runner's own Docker.
+      - run: uv run -m pytest
+
+  frontend-tests:
+    # Same reason as backend-tests.
+    if: github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front-end/video-app-front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: front-end/video-app-front/package-lock.json
+      # Same flag as the frontend Dockerfile: the peer ranges of some packages lag Angular.
+      - run: npm ci --legacy-peer-deps
+      - run: npm run test:ci
+
+  e2e:
+    needs: [backend-tests, frontend-tests]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e2e
+    env:
+      # Overrides e2e.env: compose prefers the shell environment.
+      BACKEND_IMAGE: video-app-backend:ci
+      FRONTEND_IMAGE: video-app-frontend:ci
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # Builds the images once; everything after this uses exactly these.
+      - run: npm run stack:up
+
+      - run: npm test
+
+      - name: Collect stack logs
+        if: failure()
+        run: npm run stack:logs > stack.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/stack.log
+          retention-days: 14
+
+      - name: Stop the stack
+        if: always()
+        run: npm run stack:down
+
+      # Pushes the images the journeys just passed against, not a rebuild of them.
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          for app in backend frontend; do
+            for tag in latest "sha-${short_sha}"; do
+              docker tag "video-app-${app}:ci" "${REGISTRY_USER}/video-app-${app}:${tag}"
+              docker push "${REGISTRY_USER}/video-app-${app}:${tag}"
+            done
+          done
