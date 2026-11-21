@@ -19,7 +19,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ResultState, BrowsedVideo, FileBrowseNode } from '../../models/GQL-result.model';
-import { SortCriterion, formatFileSize, isNodeLocked, nodeDirectory } from '../../models/management.model';
+import { SortCriterion, formatFileSize, isNodeLocked, nodeDirectory, selectableVideoIds } from '../../models/management.model';
 import { environment } from '../../../../environments/environment';
 import { FileNodeMenu } from '../file-node-menu/file-node-menu';
 
@@ -80,10 +80,8 @@ export class FileBrowseTable {
 
   // --- Computed ---
   isAllSelected = computed(() => {
-    const contents = this.directoryContents().data;
-    if (!contents || contents.length === 0) return false;
-    const selectableItems = contents.filter(item => !item.node.isDir);
-    return selectableItems.length > 0 && selectableItems.every(item => this.selectedIds().has(item.node.id));
+    const selectable = selectableVideoIds(this.directoryContents().data ?? []);
+    return selectable.length > 0 && selectable.every(id => this.selectedIds().has(id));
   });
 
   hasSelection = computed(() => this.selectedIds().size > 0);

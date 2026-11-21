@@ -164,6 +164,12 @@ export class MigrationTrackerService {
 
   private watch(task: MigrationTaskItem, frames: Observable<ResultState<MigrationProgressDetail | null>>): void {
     this.watched.set(task.id, task);
+    // GqlService turns a failed subscription into a result without data, so an error
+    // reaches here as a completion; either way the task must be trackable again.
+    const release = () => {
+      this.watched.delete(task.id);
+      this.subscriptions.delete(task.id);
+    };
 
     const subscription = frames
       .pipe(takeWhile(result => {
@@ -180,10 +186,8 @@ export class MigrationTrackerService {
             this.settle(task, frame.status);
           }
         },
-        error: () => {
-          this.watched.delete(task.id);
-          this.subscriptions.delete(task.id);
-        },
+        error: release,
+        complete: release,
       });
     if (!subscription.closed) {
       this.subscriptions.set(task.id, subscription);

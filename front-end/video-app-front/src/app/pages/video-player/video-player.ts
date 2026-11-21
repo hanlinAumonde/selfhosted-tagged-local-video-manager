@@ -14,7 +14,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatDialog } from '@angular/material/dialog';
 import { GqlService } from '../../services/GQL-service/GQL.service';
 import { VideoEditPanel } from '../../shared/components/video-edit-panel/video-edit-panel';
 import { SeriesPanel } from '../../shared/components/series-panel/series-panel';
@@ -43,7 +43,6 @@ import { ToastType } from '../../shared/models/toast.model';
     MatIconModule,
     MatChipsModule,
     MatProgressSpinnerModule,
-    MatDialogModule,
     RouterLink,
     SeriesPanel,
     VideoPlayerHost,
@@ -192,14 +191,10 @@ export class VideoPlayer {
     )
   }
 
-  searchPageState(state: string, option: "author" | "tags"): SearchPageParam {
-    return option === "author" ? { author: state } : { tags: [state] };
-  }
-
   onTagClick(tagName: string) {
     this.stateService.setState<SearchPageParam>(
       environment.searchpage_api, 
-      this.searchPageState(tagName, "tags"), 
+      { tags: [tagName]}, 
       true
     );
   }
@@ -207,7 +202,7 @@ export class VideoPlayer {
   onAuthorClick(author: string) {
     this.stateService.setState<SearchPageParam>(
       environment.searchpage_api, 
-      this.searchPageState(author, "author"), 
+      { author: author }, 
       true
     );
   }

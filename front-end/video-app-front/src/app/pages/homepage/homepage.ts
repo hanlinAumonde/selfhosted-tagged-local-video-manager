@@ -11,7 +11,7 @@ import { SearchPageParam } from '../../shared/models/search.model';
 import { environment } from '../../../environments/environment';
 import { PageStateService } from '../../services/Page-state-service/page-state.service';
 import { VideoUpdateEventService } from '../../services/video-update-event-service/video-update-event.service';
-import { GetTopTagsDetail, ResultState, SearchVideosDetail } from '../../shared/models/GQL-result.model';
+import { GetTopTagsDetail, SearchVideosDetail } from '../../shared/models/GQL-result.model';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { filter, Subject, switchMap } from 'rxjs';
 
@@ -95,27 +95,18 @@ export class Homepage {
     this.SearchTrigger.next(VideoSortOption.MostViewed);
     this.tagsTrigger.next();
 
+    /*
+      Every rail, not just the ones showing a touched video: a rail's membership is what
+      changes. A video loved elsewhere is not on "Loved" yet, and a directory deletion
+      carries no ids at all.
+    */
     this.videoUpdateEventService.onEvent()
       .pipe(takeUntilDestroyed())
-      .subscribe(event => {
-        const ids = new Set(event.videoIds);
-
-        const sectionContainsAffectedId = (section: ResultState<SearchVideosDetail>) =>
-          section.data?.videos.some(v => ids.has(v.id)) ?? false;
-
-        if (sectionContainsAffectedId(this.lovedVideos())) {
-          this.SearchTrigger.next(VideoSortOption.Loved);
-        }
-        if (sectionContainsAffectedId(this.latestViewedVideos())) {
-          this.SearchTrigger.next(VideoSortOption.Latest);
-        }
-        if (sectionContainsAffectedId(this.lastUpdatedVideos())) {
-          this.SearchTrigger.next(VideoSortOption.LastUpdate);
-        }
-        if (sectionContainsAffectedId(this.mostViewedVideos())) {
-          this.SearchTrigger.next(VideoSortOption.MostViewed);
-        }
-
+      .subscribe(() => {
+        this.SearchTrigger.next(VideoSortOption.Loved);
+        this.SearchTrigger.next(VideoSortOption.Latest);
+        this.SearchTrigger.next(VideoSortOption.LastUpdate);
+        this.SearchTrigger.next(VideoSortOption.MostViewed);
         this.tagsTrigger.next();
       });
   }
@@ -135,10 +126,6 @@ export class Homepage {
       state: { sortBy: option() } as SearchPageParam,
       queryParams: { currentPageNumber: 1 }
     });
-  }
-
-  tagState(tagName: string): SearchPageParam {
-    return { tags: [tagName] };
   }
 
   onTagClick(tagName: string) {

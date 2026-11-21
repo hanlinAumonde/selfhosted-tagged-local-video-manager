@@ -6,30 +6,18 @@ import json
 import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
-from taskiq import InMemoryBroker
 
 from src import context as context_module
 from src.config import Settings
 from src.features.migration.device_slots import Device
 from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
-from src.platform.jobs.dispatch import RUN_TASK
 from src.worker import MigrationWorker
+from tests.broker_helpers import RecordingBroker
 
 pytestmark = pytest.mark.unit
 
 SOURCE_DB = "Test-category/Test-resource/movie_a.mp4"
 TARGET_DB = "Target-category/Target-resource/movie_a.mp4"
-
-
-class _RecordingBroker(InMemoryBroker):
-    def __init__(self):
-        super().__init__(await_inplace=True)
-        self.delivered: list[str] = []
-
-        async def run_task(task_id: str) -> None:
-            self.delivered.append(task_id)
-
-        self.register_task(run_task, task_name=RUN_TASK)
 
 
 @pytest.fixture
@@ -54,7 +42,7 @@ async def worker_factory(worker_settings, redis, init_db):
     workers: list[MigrationWorker] = []
 
     def _create(settings: Settings = worker_settings, broker=None) -> MigrationWorker:
-        worker = MigrationWorker(settings, broker or _RecordingBroker(), redis)
+        worker = MigrationWorker(settings, broker or RecordingBroker(), redis)
         workers.append(worker)
         return worker
 
@@ -94,7 +82,7 @@ class TestWorkerStartup:
             source_path="Test-category/Test-resource/movie_b.mp4",
             target_path="Target-category/Target-resource/movie_b.mp4",
         )
-        broker = _RecordingBroker()
+        broker = RecordingBroker()
         worker = worker_factory(broker=broker)
 
         # When the worker's startup routine runs

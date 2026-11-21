@@ -1,7 +1,7 @@
 import { Component, inject, signal, DestroyRef, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime } from 'rxjs';
+import { debounceTime, Subscription } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
@@ -58,6 +58,11 @@ export class MigrationTaskList implements OnInit {
   });
 
   activeFilterIndex = signal<number>(0);
+  /*
+    Only the latest listing may land: one for a filter or page the user has already left
+    would otherwise overwrite the list under the chips that say something else.
+  */
+  private listingSubscription?: Subscription;
 
   /* Running tasks whose cancel was accepted but has not reached the worker yet. */
   cancelling = signal<ReadonlySet<string>>(new Set());
@@ -92,7 +97,8 @@ export class MigrationTaskList implements OnInit {
       batchId: f.batchId ?? undefined,
     };
 
-    this.gqlService.getMigrationTasksQuery(input)
+    this.listingSubscription?.unsubscribe();
+    this.listingSubscription = this.gqlService.getMigrationTasksQuery(input)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
@@ -165,7 +171,14 @@ export class MigrationTaskList implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          if (!result.data?.success) return;
+          if (!result.data) return;
+          if (!result.data.success) {
+            this.toastService.emitNewToast(
+              `The task could not be cancelled: ${result.data.errorMessage ?? 'no reason given'}`,
+              ToastType.Error
+            );
+            return;
+          }
 
           /*
             A queued task is settled by the request itself. A running one has only been

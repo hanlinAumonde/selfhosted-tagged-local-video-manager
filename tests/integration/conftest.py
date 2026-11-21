@@ -1,9 +1,9 @@
 """Integration test fixtures.
 
-Wires up ALL real services (except FFmpegService) against a real filesystem
-(tmp_path) and real MongoDB (testcontainer), then drives the GraphQL schema
-directly.  This exercises the full stack:
-  GraphQL API -> resolvers -> services -> database + filesystem
+Wires up ALL real services (except ffmpeg and thumbnail generation) against a real
+filesystem (tmp_path), a real MongoDB and a real Redis (testcontainers), then drives the
+GraphQL schema directly.  This exercises the full stack:
+  GraphQL API -> resolvers -> services -> database + filesystem + task queue + progress
 """
 
 from collections.abc import AsyncGenerator
@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from redis.asyncio import Redis
 
-from src import config
 from src.config import Settings
 from src.context import ContextEnum
 from src.schema.strawberry_schema import schema as gql_schema
@@ -26,10 +26,16 @@ from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
+from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.dispatch import TaskDispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
+from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.features.catalog.tag_operation_service import TagOperationService
 from src.features.playback.thumbnail_service import ThumbnailService
+from tests.broker_helpers import RecordingBroker
+from tests.integration.helpers import build_integration_settings
 
 
 # -----------------------------------------------------------------------
@@ -80,15 +86,15 @@ def integration_resource_dir(tmp_path: Path) -> Path:
 def integration_settings(
     test_settings: Settings,
     integration_resource_dir: Path,
+    redis_url: str,
     monkeypatch,
 ) -> Settings:
-    payload = test_settings.model_dump()
-    payload["resource_paths"] = {
-        "Test-category": {"Test-resource": str(integration_resource_dir)},
-    }
-    settings = Settings.model_validate(payload)
-    monkeypatch.setattr(config, "_settings", settings)
-    return settings
+    return build_integration_settings(
+        test_settings,
+        {"Test-category": {"Test-resource": str(integration_resource_dir)}},
+        redis_url,
+        monkeypatch,
+    )
 
 
 # -----------------------------------------------------------------------
@@ -100,9 +106,11 @@ def real_resource_handler_service(integration_settings: Settings) -> ResourceHan
     return ResourceHandlerService(settings=integration_settings)
 
 
-@pytest.fixture
-def real_cache_service(integration_settings: Settings) -> CacheService:
-    return CacheService(config=integration_settings.cache_config)
+@pytest_asyncio.fixture
+async def real_cache_service(integration_settings: Settings) -> AsyncGenerator[CacheService, None]:
+    cache = CacheService(config=integration_settings.cache_config)
+    yield cache
+    await cache.close()
 
 
 @pytest.fixture
@@ -142,21 +150,28 @@ def mock_thumbnail_service() -> MagicMock:
 
 
 @pytest.fixture
-def real_path_lock_registry(
-    real_dir_metadata_service: DirMetadataService,
+def real_migration_service(
+    integration_settings: Settings,
     real_resource_handler_service: ResourceHandlerService,
-) -> PathLockRegistry:
-    """The registry as the composition root builds it: migration registered as a provider,
-    so lock state still comes from real task documents."""
-    registry = PathLockRegistry()
-    registry.register(
-        MIGRATION_EXECUTOR_KEY,
-        MigrationService(
-            resource_handler_service=real_resource_handler_service,
-            dir_metadata_service=real_dir_metadata_service,
-            series_service=SeriesService(),
-        ),
+    real_dir_metadata_service: DirMetadataService,
+    real_series_service: SeriesService,
+) -> MigrationService:
+    """The web side's migration service: creates, lists, cancels and retries tasks but
+    holds no copy slots, because the worker is the one that runs them."""
+    return MigrationService(
+        resource_handler_service=real_resource_handler_service,
+        dir_metadata_service=real_dir_metadata_service,
+        series_service=real_series_service,
+        progress_flush_interval=integration_settings.tasks.progress_flush_interval,
     )
+
+
+@pytest.fixture
+def real_path_lock_registry(real_migration_service: MigrationService) -> PathLockRegistry:
+    """The registry as the composition root builds it: the same migration service the
+    resolvers use is the provider, so lock state comes from real task documents."""
+    registry = PathLockRegistry()
+    registry.register(MIGRATION_EXECUTOR_KEY, real_migration_service)
     return registry
 
 
@@ -216,14 +231,35 @@ def real_catalog_service(
 
 
 # -----------------------------------------------------------------------
-# ----------------------- Mock migration service ---------------------------
+# ----------------------- Task infrastructure ----------------------------
 # -----------------------------------------------------------------------
 
 @pytest.fixture
-def mock_migration_service() -> MagicMock:
-    svc = MagicMock(spec=MigrationService, name="MigrationService")
-    svc.is_file_locked = AsyncMock(return_value=False)
-    return svc
+def migration_broker() -> RecordingBroker:
+    """The migration queue. Records the task ids it is handed instead of running them,
+    so a test plays the worker by running what was delivered (see migration/conftest.py)."""
+    return RecordingBroker()
+
+
+@pytest_asyncio.fixture
+async def redis(redis_url: str) -> AsyncGenerator[Redis, None]:
+    client = Redis.from_url(redis_url, decode_responses=True)
+    yield client
+    await client.aclose()
+
+
+@pytest_asyncio.fixture
+async def real_progress_bus(
+    integration_settings: Settings, redis: Redis
+) -> AsyncGenerator[ProgressBus, None]:
+    bus = ProgressBus(
+        redis,
+        integration_settings.cache_config.key_prefix,
+        watchdog_interval=integration_settings.tasks.observe_watchdog_interval,
+    )
+    await bus.start()
+    yield bus
+    await bus.stop()
 
 
 # -----------------------------------------------------------------------
@@ -243,9 +279,12 @@ def integration_context(
     real_browse_file_service: BrowseFileService,
     real_batch_operation_service: BatchOperationService,
     real_catalog_service: CatalogService,
-    mock_migration_service: MagicMock,
+    real_migration_service: MigrationService,
+    migration_broker: RecordingBroker,
+    real_progress_bus: ProgressBus,
+    redis: Redis,
 ) -> dict[ContextEnum, Any]:
-    return {
+    context = {
         ContextEnum.SETTINGS: integration_settings,
         ContextEnum.CACHE_SERVICE: real_cache_service,
         ContextEnum.RESOURCE_HANDLER_SERVICE: real_resource_handler_service,
@@ -257,8 +296,19 @@ def integration_context(
         ContextEnum.BROWSE_FILE_SERVICE: real_browse_file_service,
         ContextEnum.BATCH_OPERATION_SERVICE: real_batch_operation_service,
         ContextEnum.CATALOG_SERVICE: real_catalog_service,
-        ContextEnum.MIGRATION_SERVICE: mock_migration_service,
+        ContextEnum.MIGRATION_SERVICE: real_migration_service,
+        ContextEnum.MIGRATION_BATCH_SERVICE: MigrationBatchService(real_migration_service),
+        ContextEnum.MIGRATION_DISPATCHER: TaskDispatcher(migration_broker, MigrationTaskModel),
+        ContextEnum.PROGRESS_BUS: real_progress_bus,
+        ContextEnum.PROGRESS_PUBLISHER: ProgressPublisher(
+            redis, integration_settings.cache_config.key_prefix
+        ),
     }
+    # A key the composition root hands the resolvers but this context lacks would only
+    # surface as a KeyError inside whichever resolver first asks for it.
+    missing = set(ContextEnum) - context.keys()
+    assert not missing, f"integration_context is missing {sorted(k.name for k in missing)}"
+    return context
 
 
 # -----------------------------------------------------------------------
@@ -297,3 +347,18 @@ def subscribe_gql(integration_context, schema) -> Callable:
             events.append(result)
         return events
     return _subscribe
+
+
+@pytest_asyncio.fixture
+def stream_gql(integration_context, schema) -> Callable:
+    """Open a subscription and hand back its event stream, for a test that has to act
+    between events — e.g. start the worker only once the subscription has opened."""
+    async def _stream(query: str, variables: dict | None = None):
+        result = await schema.subscribe(
+            query,
+            variable_values=variables,
+            context_value=integration_context,
+        )
+        assert hasattr(result, "__aiter__"), f"subscription did not open: {result}"
+        return result
+    return _stream

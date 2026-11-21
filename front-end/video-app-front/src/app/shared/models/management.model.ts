@@ -55,6 +55,14 @@ export function isNodeLocked(node: BrowsedVideo): boolean {
     return !node.isDir && node.isLocked;
 }
 
+/*
+  Select-all takes exactly what a checkbox could: a locked video's checkbox is disabled, so
+  select-all must not reach it either, or a batch would carry a file the backend refuses.
+*/
+export function selectableVideoIds(contents: ReadonlyArray<FileBrowseNode>): string[] {
+    return contents.filter(item => !item.node.isDir && !isNodeLocked(item.node)).map(item => item.node.id);
+}
+
 /**
  * The directory an entry actually sits in, in DB path format.
  *

@@ -16,14 +16,12 @@
     >
       <!-- 16:9 -->
       <div class="relative w-full pt-[56.25%] rounded-t-md bg-gray-200 dark:bg-gray-700 overflow-hidden">
-        <img
-          [src]="thumbnailSrc()"
-          [alt]="video()!.name"
-          class="absolute top-0 left-0 w-full h-full rounded-b-none"
-          [class.object-cover]="!isDefaultThumbnail()"
-          [class.object-contain]="isDefaultThumbnail()"
-          [class.p-4]="isDefaultThumbnail()"
+        <!-- Keyed by id alone, so a refreshed copy of the same video keeps its image. -->
+        <app-file-thumbnail
+          class="absolute top-0 left-0"
           [class.grayscale]="isLocked()"
+          [videoId]="video()!.id"
+          [alt]="video()!.name"
         />
         @if(isLocked()){
           <div class="absolute inset-0 flex items-center justify-center bg-black/45">

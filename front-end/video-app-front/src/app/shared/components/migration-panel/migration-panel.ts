@@ -309,10 +309,11 @@ export class MigrationPanel {
     if (this.isBatch) return this.canProceedBatch();
     const result = this.preflightResult();
     if (!result) return false;
-    if (!result.valid && !result.conflictExists) return false;
-    if (result.conflictExists && !this.conflictStrategy()) return false;
-    if (result.conflictExists && this.conflictStrategy() === 'skip') return false;
-    return true;
+    // A namesake does not make a result invalid; it only asks for a strategy.
+    if (!result.valid) return false;
+    if (!result.conflictExists) return true;
+    const strategy = this.conflictStrategy();
+    return !!strategy && strategy !== 'skip';
   }
 
   private canProceedBatch(): boolean {

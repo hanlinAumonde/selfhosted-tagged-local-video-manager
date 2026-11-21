@@ -45,7 +45,6 @@
               <a
                 [routerLink]="[searchPageApi]"
                 [queryParams]="{ currentPageNumber: 1 }"
-                [state]="searchPageState(video().data?.author ?? '', 'author')"
                 (click)="onAuthorClick(video().data?.author ?? '')"
                 target="_blank"
               >
@@ -96,7 +95,6 @@
                   <a
                     [routerLink]="[searchPageApi]"
                     [queryParams]="{ currentPageNumber: 1 }"
-                    [state]="searchPageState(tag.name, 'tags')"
                     (click)="onTagClick(tag.name)"
                     target="_blank"
                   >

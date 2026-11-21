@@ -32,12 +32,12 @@ export class PageStateService {
         }
     }
 
-    clearAllStates(crossPage: boolean): void {
-        if (crossPage) {
-            localStorage.clear();
-        } else {
-            sessionStorage.clear();
-        }
+    /*
+      Tab states only: localStorage is shared with other features (the saved theme lives
+      there), so it is never cleared wholesale.
+    */
+    clearAllTabStates(): void {
+        sessionStorage.clear();
     }
 
 }

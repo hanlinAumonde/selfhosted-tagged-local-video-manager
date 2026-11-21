@@ -1,6 +1,7 @@
 import {
   AfterViewInit,
   Component,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -30,6 +31,7 @@ export class SeriesPanel implements AfterViewInit {
   private gqlService = inject(GqlService);
   private httpClientService = inject(HttpClientService);
   private videoUpdateEventService = inject(VideoUpdateEventService);
+  private destroyRef = inject(DestroyRef);
 
   seriesName = input.required<string | null | undefined>();
   currentVideoId = input.required<string | null | undefined>();
@@ -90,6 +92,13 @@ export class SeriesPanel implements AfterViewInit {
           this.reloadToken.update(token => token + 1);
         }
       });
+
+    // Blob URLs pin their image in memory until revoked, long after the panel is gone.
+    this.destroyRef.onDestroy(() => {
+      for (const url of this.thumbnailCache.values()) {
+        if (url !== this.defaultThumbnail) URL.revokeObjectURL(url);
+      }
+    });
   }
 
   ngAfterViewInit() {
@@ -118,7 +127,7 @@ export class SeriesPanel implements AfterViewInit {
     for (const v of videos) {
       if (this.thumbnailCache.has(v.id)) continue;
       this.thumbnailCache.set(v.id, this.defaultThumbnail);
-      this.httpClientService.getThumbnailUrl(v.id).subscribe({
+      this.httpClientService.getThumbnailUrl(v.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const blob = response.body;
           if (blob) {

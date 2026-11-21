@@ -2,6 +2,7 @@ import { Component, inject, computed, effect, signal, ChangeDetectionStrategy } 
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { debounceTime, Subject, switchMap } from 'rxjs';
 import { ActivatedRoute, Router } from '@angular/router';
+import { Location } from '@angular/common';
 import { form, FormField } from '@angular/forms/signals';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -25,7 +26,6 @@ import { environment } from '../../../environments/environment';
 import { PageStateService } from '../../services/Page-state-service/page-state.service';
 import { maxLengthRule } from '../../services/validation-service/validation.rules';
 import { VideoUpdateEventService } from '../../services/video-update-event-service/video-update-event.service';
-import { VideoUpdateType } from '../../shared/models/events.model';
 
 @Component({
   selector: 'app-search',
@@ -52,6 +52,7 @@ export class Search {
   private dialog = inject(MatDialog);
   private stateService = inject(PageStateService);
   private videoUpdateEventService = inject(VideoUpdateEventService);
+  private location = inject(Location);
 
   private updateSearchParamsAndForm(params: SearchPageParam) {
     this.searchParams.set({
@@ -147,7 +148,9 @@ export class Search {
           params.currentPage ?? 1,
           params.tags ?? []
         ).pipe(map(result => {
-          if(params.checkPageBounds && !result.loading && result.data) {
+          // Results shrink under the page on screen (deleted elsewhere, or a stale URL):
+          // land on the last page that still has something rather than on an empty one.
+          if(!result.loading && result.data) {
             const pagination = result.data.pagination;
             if (pagination.size > 0) {
               const maxPage = Math.max(1, Math.ceil(pagination.totalCount / pagination.size));
@@ -175,14 +178,15 @@ export class Search {
     const hasStatePredicate = (state: SearchPageParam | undefined) => 
       state && (state.sortBy || state.tags?.length || state.title || state.author);
 
+    // Read through the router's Location rather than the window: same values in a browser,
+    // and the only ones that exist under a test's mock platform location.
     const stateFound = [
       this.stateService.getState<SearchPageParam>(environment.searchpage_api + environment.refreshKey, false),
-      history.state as SearchPageParam | undefined,
+      this.location.getState() as SearchPageParam | undefined,
       this.stateService.getState<SearchPageParam>(environment.searchpage_api, true)
     ].find(hasStatePredicate);
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const hasUrlParams = urlParams.has('currentPageNumber');
+    const hasUrlParams = this.route.snapshot.queryParamMap.has('currentPageNumber');
 
     if (stateFound) {
       this.updateSearchParamsAndForm(stateFound);
@@ -195,38 +199,19 @@ export class Search {
     effect(() => {
       const params = this.searchParams();
       if (this.hasSearched()) {
-        this.searchTrigger.next({ 
-          ...params, 
-          checkPageBounds: false, 
-          currentPage: this.currentPage(),
-        });
+        this.searchTrigger.next({ ...params, currentPage: this.currentPage() });
       }
     });
 
+    /*
+      Any change, not just one to a video on screen: what matches is what changes. A video
+      loved elsewhere is not in the "Loved" results yet; a deletion shifts every page.
+    */
     this.videoUpdateEventService.onEvent()
       .pipe(takeUntilDestroyed())
-      .subscribe(event => {
+      .subscribe(() => {
         if (this.hasSearched()) {
-          const currentVideos = this.searchResults().data?.videos;
-          // For update events, only refresh if current results contain affected videos
-          if (event.type === VideoUpdateType.Updated) {
-            const ids = new Set(event.videoIds);
-            const affected = currentVideos?.some(v => ids.has(v.id)) ?? false;
-            if (affected) {
-              this.searchTrigger.next({ 
-                ...this.searchParams(), 
-                checkPageBounds: false, 
-                currentPage: this.currentPage(), 
-              });
-            }
-            return;
-          }
-          // For delete events, always re-execute since pagination may shift
-          this.searchTrigger.next({ 
-            ...this.searchParams(),
-            checkPageBounds: false, 
-            currentPage: this.currentPage() 
-          });
+          this.searchTrigger.next({ ...this.searchParams(), currentPage: this.currentPage() });
         }
       });
   }
