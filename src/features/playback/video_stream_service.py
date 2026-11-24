@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from src.constants.media import BROWSER_MIME_TYPES, TRANSCODED_MIME_TYPE
 from src.constants.storage import STREAM_CHUNK_SIZE
 from src.errors import InvalidRangeError, VideoFileNotFoundError, VideoNotFoundError
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.logger import get_logger
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath

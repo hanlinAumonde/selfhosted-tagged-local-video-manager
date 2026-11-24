@@ -15,10 +15,10 @@ from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.migration.device_slots import DeviceSlots
 from src.platform.storage.resource_handler_service import ResourceHandlerService
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 from src.features.catalog.series_service import SeriesService
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.errors import _MigrationCancelled, InputValidationError
 from src.logger import get_logger
 from src.platform.storage.absolute_path import AbsolutePath

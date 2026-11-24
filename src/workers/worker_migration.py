@@ -13,7 +13,7 @@ from src.features.catalog.series_service import SeriesService
 from src.features.migration.device_slots import DeviceSlots
 from src.features.migration.migration_batch import BatchWindow, MigrationBatchService
 from src.features.migration.migration_service import MigrationService
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.logger import get_logger, setup_logger
 from src.platform.cache.cache_service import CacheService
 from src.constants.tasks import RUN_TASK

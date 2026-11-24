@@ -12,7 +12,7 @@ import json
 import pytest
 
 from src.config import Settings
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 from tests.unit.features.migration.batch_helpers import (
     SOURCE_ROOT,

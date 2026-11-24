@@ -1,7 +1,7 @@
 """Read series membership back from the database in a form assertions can be written against."""
 
-from src.features.catalog.series import SeriesModel
-from src.features.catalog.video import VideoModel
+from src.features.catalog.series_model import SeriesModel
+from src.features.catalog.video_model import VideoModel
 
 
 async def stored_series(name: str) -> list[str] | None:

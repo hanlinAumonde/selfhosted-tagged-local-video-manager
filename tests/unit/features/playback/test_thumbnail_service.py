@@ -6,7 +6,7 @@ import pytest
 
 from src.config import Settings
 from src.errors import InputValidationError, VideoFileNotFoundError, VideoNotFoundError
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.features.playback.thumbnail_service import StorageBreaker, ThumbnailService
 from .conftest import STORAGE_COOLDOWN, run_attached_work
 

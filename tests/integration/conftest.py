@@ -29,7 +29,7 @@ from src.features.catalog.series_service import SeriesService
 from src.features.migration.migration_batch import MigrationBatchService
 from src.constants.tasks import MIGRATION_EXECUTOR_KEY
 from src.features.migration.migration_service import MigrationService
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.workers.dispatch import TaskDispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher

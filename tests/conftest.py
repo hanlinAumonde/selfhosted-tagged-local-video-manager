@@ -10,14 +10,14 @@ from testcontainers.community.redis import RedisContainer
 import pytest
 
 from src import config
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.features.migration.migration_batch_model import MigrationBatchModel
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 from src.config import Settings
-from src.features.catalog.series import SeriesModel
-from src.features.catalog.video_tag import VideoTagModel
-from src.features.catalog.video import VideoModel
+from src.features.catalog.series_model import SeriesModel
+from src.features.catalog.video_tag_model import VideoTagModel
+from src.features.catalog.video_model import VideoModel
 
 # -----------------------------------------------------------------------
 # ---------------------- Infrastructure fixtures -------------------------

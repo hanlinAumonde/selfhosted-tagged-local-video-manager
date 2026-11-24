@@ -2,7 +2,7 @@
 with its disk size, and from then on can be found by search.
 """
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from tests.integration.helpers import DRAMA_DIR, RESOURCE_DIR, browse_nodes, searched_names
 
 

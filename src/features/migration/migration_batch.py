@@ -9,7 +9,7 @@ from bson.errors import InvalidId
 from src.errors import InputValidationError
 from src.features.migration.migration_batch_model import MigrationBatchModel
 from src.features.migration.migration_service import MigrationPreflightResult, MigrationService
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.logger import get_logger
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.platform.jobs.task_model import TaskStatus

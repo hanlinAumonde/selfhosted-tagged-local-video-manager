@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.config import Settings
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.features.playback.thumbnail_service import ThumbnailService
 from src.platform.storage.local_fs.local_fs_handler import LocalFSResourceHandler
 from .conftest import STORAGE_COOLDOWN, body_of, run_attached_work

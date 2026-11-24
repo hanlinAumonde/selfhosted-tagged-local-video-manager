@@ -5,7 +5,7 @@ import strawberry
 
 from src.features.migration import migration_service
 from src.features.migration.migration_batch import BatchSummary
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.progress import ProgressFrame
 from src.schema.types.fileBrowse_type import RelativePathInput
 from src.schema.types.scalars import BigInt

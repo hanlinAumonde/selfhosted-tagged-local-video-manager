@@ -16,8 +16,8 @@ from src.config import Settings
 from src.features.browsing.browse_file_service import (
     BrowseFileService, DirectoryEntry, VideoEntry,
 )
-from src.features.catalog.video import VideoModel
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.catalog.video_model import VideoModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.storage.absolute_path import AbsolutePath
 
 pytestmark = pytest.mark.unit

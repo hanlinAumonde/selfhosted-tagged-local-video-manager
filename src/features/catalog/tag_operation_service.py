@@ -2,7 +2,7 @@ from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
 
 from src.config import Settings
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from src.logger import get_logger
 
 logger = get_logger("tag_operation_service")

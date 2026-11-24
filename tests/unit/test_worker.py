@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from src import context as context_module
 from src.config import Settings
 from src.features.migration.device_slots import Device
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 from src.workers.worker_migration import MigrationWorker
 from tests.broker_helpers import RecordingBroker

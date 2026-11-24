@@ -1,11 +1,11 @@
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
-from src.features.catalog.video import VideoModel
-from src.features.catalog.series import SeriesModel
-from src.features.catalog.video_tag import VideoTagModel
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.series_model import SeriesModel
+from src.features.catalog.video_tag_model import VideoTagModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.features.migration.migration_batch_model import MigrationBatchModel
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.config import MongoConfig
 from src.logger import get_logger
 

@@ -2,7 +2,7 @@
 is still there, and each hit says which sub-directory it was found in.
 """
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from tests.integration.graphql_documents import SEARCH_IN_DIRECTORY
 from tests.integration.helpers import (
     DRAMA_DIR,

@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.features.browsing.browse_file_service import DirectoryEntry, VideoEntry
 from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.absolute_path import AbsolutePath

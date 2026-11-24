@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from beanie.operators import Set
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from .conftest import body_of
 
 pytestmark = pytest.mark.unit

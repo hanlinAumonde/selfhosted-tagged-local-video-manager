@@ -16,18 +16,13 @@ pytestmark = pytest.mark.unit
 SRC = Path(__file__).resolve().parents[2] / "src"
 
 # Presentation modules: they define the strawberry types the schema is built from.
-#: Modules that define Beanie documents, one per feature that owns a collection.
-DOCUMENT_MODULES = {
-    "src.features.catalog.video",
-    "src.features.catalog.video_tag",
-    "src.features.browsing.dir_metadata",
-    "src.features.migration.migration_task",
-    "src.features.migration.migration_batch_model"
-}
+#: Beanie documents live in their own ``*_model.py`` modules (project naming rule), so the
+#: suffix identifies them without a hand-kept list that a new collection could be missing from.
+DOCUMENT_MODULE_SUFFIX = "_model"
 
 
 def _is_document_module(name: str) -> bool:
-    return name in DOCUMENT_MODULES
+    return name.endswith(DOCUMENT_MODULE_SUFFIX)
 
 
 PRESENTATION_MODULES = {

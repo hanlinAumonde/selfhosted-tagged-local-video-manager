@@ -6,7 +6,7 @@ import pytest
 
 from unittest.mock import AsyncMock
 
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 from src.features.migration.migration_service import MigrationPreflightResult
 from src.platform.jobs.progress import ProgressFrame

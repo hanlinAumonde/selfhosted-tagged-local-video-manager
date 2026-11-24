@@ -5,8 +5,8 @@ import pytest
 
 from src.platform.jobs.task_model import TaskStatus
 
-from src.features.catalog.video import VideoModel
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from tests.series_helpers import stored_series
 from tests.graphql.helpers import (
     UPDATE_VIDEO_METADATA,

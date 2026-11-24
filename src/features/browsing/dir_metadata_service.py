@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pymongo import UpdateOne
 
 from src.config import Settings
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.logger import get_logger
 from src.platform.cache.cache_service import CacheService
 from src.platform.storage.absolute_path import AbsolutePath

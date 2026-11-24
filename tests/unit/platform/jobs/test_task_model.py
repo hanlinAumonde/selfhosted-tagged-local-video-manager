@@ -8,7 +8,7 @@ inheritance must neither change collection ownership nor require migrating store
 
 import pytest
 
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
 
 pytestmark = pytest.mark.unit

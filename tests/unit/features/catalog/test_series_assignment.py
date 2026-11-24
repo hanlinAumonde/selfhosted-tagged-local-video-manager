@@ -18,7 +18,7 @@ Every scenario asserts on what is stored: the target's ``videoIds`` in order, ea
 import pytest
 
 from src.features.catalog.series_service import SeriesService
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from tests.series_helpers import series_name_of, stored_series
 
 pytestmark = pytest.mark.unit

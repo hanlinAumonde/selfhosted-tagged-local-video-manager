@@ -5,10 +5,10 @@ from enum import Enum
 from bson import ObjectId
 
 from src.config import Settings
-from src.features.catalog.series import SeriesModel
+from src.features.catalog.series_model import SeriesModel
 from src.features.catalog.series_service import SeriesService
-from src.features.catalog.video import VideoModel
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from src.errors import DatabaseOperationError, InputValidationError, VideoNotFoundError
 from src.logger import get_logger
 from src.schema.types.pydantic_types.batch_operation_type import SeriesOrderEntryInputModel

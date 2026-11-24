@@ -5,7 +5,7 @@ import time
 
 from src.features.migration.migration_batch_model import MigrationBatchModel
 from src.features.migration.migration_service import MigrationService
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
 
 

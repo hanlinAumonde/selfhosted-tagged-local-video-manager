@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from src.config import Settings
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.cache.cache_service import CacheService
 from src.platform.storage.resource_handler_service import ResourceHandlerService

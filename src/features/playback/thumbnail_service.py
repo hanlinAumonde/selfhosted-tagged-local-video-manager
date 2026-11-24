@@ -8,7 +8,7 @@ from src.config import Settings
 from src.constants.http import THUMBNAIL_CACHE_CONTROL
 from src.constants.storage import THUMBNAIL_KEY_PREFIX
 from src.errors import InputValidationError, VideoFileNotFoundError, VideoNotFoundError
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.logger import get_logger
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath

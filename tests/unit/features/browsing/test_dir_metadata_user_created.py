@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 

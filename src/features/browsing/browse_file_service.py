@@ -8,7 +8,7 @@ from pymongo import UpdateOne
 
 from src.constants.storage import NAME_SEPARATORS
 from src.config import Settings
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
 from src.features.browsing.dir_metadata_service import DirFlags, DirMetadataService
