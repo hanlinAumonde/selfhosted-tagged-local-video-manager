@@ -6,15 +6,17 @@ pattern subscription in the web process and the watchdog are all exercised for r
 
 import asyncio
 import json
-import uuid
 
 import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from src.config import RedisConfig
+
 from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.jobs.task_model import TaskStatus
+from src.platform.redis.redis_service import RedisService
 
 pytestmark = pytest.mark.unit
 
@@ -37,30 +39,29 @@ class _Snapshots:
         return self.frame
 
 
-@pytest_asyncio.fixture
-async def redis(redis_url):
-    client = Redis.from_url(redis_url, decode_responses=True)
-    yield client
-    await client.aclose()
+@pytest.fixture
+def redis(redis_service: RedisService) -> Redis:
+    """The service's own client, for inspecting what landed in Redis."""
+    return redis_service.client
 
 
 @pytest.fixture
-def prefix() -> str:
+def prefix(redis_prefix: str) -> str:
     # A fresh namespace per test, so frames from one test can never reach another.
-    return f"pfx-{uuid.uuid4().hex[:8]}"
+    return redis_prefix
 
 
 @pytest.fixture
-def publisher(redis, prefix) -> ProgressPublisher:
-    return ProgressPublisher(redis, prefix, LATEST_FRAME_TTL)
+def publisher(redis_service) -> ProgressPublisher:
+    return ProgressPublisher(redis_service, LATEST_FRAME_TTL)
 
 
 @pytest_asyncio.fixture
-async def bus_factory(redis, prefix):
+async def bus_factory(redis_service):
     buses: list[ProgressBus] = []
 
     async def _create(**kwargs) -> ProgressBus:
-        bus = ProgressBus(redis, prefix, **kwargs)
+        bus = ProgressBus(redis_service, **kwargs)
         await bus.start()
         buses.append(bus)
         return bus
@@ -80,10 +81,11 @@ async def _rest(stream, timeout: float = 2.0) -> list[ProgressFrame]:
 
 
 class TestPublisher:
-    async def test_published_frame_is_stored_as_latest_with_a_short_ttl(self, redis):
+    async def test_published_frame_is_stored_as_latest_with_a_short_ttl(
+        self, redis, redis_service, prefix
+    ):
         # Given a ProgressPublisher on prefix "pfx"
-        prefix = f"pfx-{uuid.uuid4().hex[:8]}"
-        publisher = ProgressPublisher(redis, prefix, LATEST_FRAME_TTL)
+        publisher = ProgressPublisher(redis_service, LATEST_FRAME_TTL)
 
         # When it publishes a PROCESSING frame for task "t1" at 40 of 100
         await publisher.publish(_frame("t1", TaskStatus.PROCESSING, 40))
@@ -211,6 +213,36 @@ class TestObserve:
         assert [f.status for f in await _rest(second)] == ["COMPLETED"]
 
 
+class TestIdleSubscription:
+    async def test_a_frame_published_after_an_idle_longer_than_the_socket_timeout_still_arrives(
+        self, redis_url, redis_prefix,
+    ):
+        # Given a ProgressBus and a ProgressPublisher built on one RedisService
+        #   whose socket_timeout is 0.5 seconds
+        service = RedisService(
+            RedisConfig(url=redis_url, socket_timeout=0.5, key_prefix=redis_prefix)
+        )
+        bus = ProgressBus(service, watchdog_interval=60)
+        await bus.start()
+        publisher = ProgressPublisher(service, LATEST_FRAME_TTL)
+        try:
+            # And a client observing task "t1", which opened with its PENDING snapshot
+            stream = bus.observe("t1", _Snapshots(_frame("t1", TaskStatus.PENDING)))
+            assert (await anext(stream)).status == "PENDING"
+
+            # When nothing is published for 1.5 seconds
+            await asyncio.sleep(1.5)
+            # And then a COMPLETED frame for "t1" is published
+            await publisher.publish(_frame("t1", TaskStatus.COMPLETED, 100))
+
+            # Then the observer receives that COMPLETED frame and its stream ends
+            frames = await _rest(stream)
+            assert [f.status for f in frames] == ["COMPLETED"]
+        finally:
+            await bus.stop()
+            await service.aclose()
+
+
 class TestWatchdog:
     async def test_stream_ends_when_the_task_settled_without_a_terminal_frame(
         self, bus_factory
@@ -317,15 +349,16 @@ class TestStaleLatestFrame:
 
 
 class TestConfiguredLatestFrameTtl:
-    async def test_the_latest_frame_lives_as_long_as_the_publisher_is_told(self, redis):
+    async def test_the_latest_frame_lives_as_long_as_the_publisher_is_told(
+        self, redis, redis_service, prefix
+    ):
         """
         Scenario: how long the latest frame is kept is set by whoever builds the publisher
           Given a ProgressPublisher built with a latest-frame TTL of 5 seconds
           When it publishes a PROCESSING frame for task "t1"
           Then the latest-frame key of "t1" expires within 5 seconds
         """
-        prefix = f"pfx-{uuid.uuid4().hex[:8]}"
-        publisher = ProgressPublisher(redis, prefix, latest_frame_ttl=5)
+        publisher = ProgressPublisher(redis_service, latest_frame_ttl=5)
 
         await publisher.publish(_frame("t1", TaskStatus.PROCESSING, 40))
 

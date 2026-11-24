@@ -185,3 +185,42 @@ class TestPlatformStaysGeneric:
         )
 
         assert offenders == [], f"platform modules importing fastapi: {offenders}"
+
+class TestRedisHasOneOwner:
+    """Every Redis connection, key name and "Redis is down" policy lives in
+    ``src/platform/redis``. A module that builds its own client is a second answer to all
+    three — another pool, another timeout, another prefix concatenation."""
+
+    # Scenario: only the Redis platform module talks to Redis directly
+    #   Given every module under src/
+    #   When their imports are scanned
+    #   Then the only modules importing redis (redis, redis.asyncio, redis.exceptions, ...)
+    #       are under src/platform/redis
+    def test_only_the_redis_platform_module_imports_redis(self):
+        offenders = _modules_importing("redis", allowed_under=SRC / "platform" / "redis")
+
+        assert offenders == [], f"modules importing redis outside src/platform/redis: {offenders}"
+
+    # Scenario: the queue broker's Redis client stays with the workers
+    #   Given every module under src/
+    #   When their imports are scanned
+    #   Then the only modules importing taskiq_redis are under src/workers — taskiq-redis
+    #       builds its own connection pool from a URL and cannot share RedisService's
+    def test_only_the_workers_import_taskiq_redis(self):
+        offenders = _modules_importing("taskiq_redis", allowed_under=SRC / "workers")
+
+        assert offenders == [], f"modules importing taskiq_redis outside src/workers: {offenders}"
+
+
+def _modules_importing(package: str, allowed_under: Path) -> list[str]:
+    """Modules under src/, outside ``allowed_under``, that import ``package`` or a submodule."""
+    return sorted(
+        _relative(path)
+        for path in SRC.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and not path.is_relative_to(allowed_under)
+        and any(
+            name == package or name.startswith(f"{package}.")
+            for name in _imported_modules(path)
+        )
+    )

@@ -8,10 +8,12 @@ from taskiq.exceptions import SendTaskError
 from taskiq.kicker import AsyncKicker
 from taskiq_redis import RedisStreamBroker
 
+from src.constants.redis import CONSUMER_GROUP_SUFFIX, QUEUE_NAMESPACE
 from src.constants.tasks import RUN_TASK
 from src.logger import get_logger
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
+from src.platform.redis.redis_service import RedisService
 
 logger = get_logger("dispatch")
 
@@ -26,7 +28,7 @@ class Queue(StrEnum):
     MIGRATION = "migration"
 
 
-def build_broker(queue: str, redis_url: str, prefix: str) -> RedisStreamBroker:
+def build_broker(queue: str, redis: RedisService) -> RedisStreamBroker:
     """
     Build the Redis Stream broker for one queue.
 
@@ -41,10 +43,10 @@ def build_broker(queue: str, redis_url: str, prefix: str) -> RedisStreamBroker:
 
     :param queue: Queue name, e.g. ``Queue.MIGRATION``.
     :type queue: str
-    :param redis_url: Redis the web process and the queue's worker share.
-    :type redis_url: str
-    :param prefix: Key prefix shared with the cache and the progress channels.
-    :type prefix: str
+    :param redis: The Redis the web process and the queue's worker share. The broker opens
+        its own pool to it — taskiq-redis takes only a URL — but its names come from here.
+    :type redis: RedisService
+
     The consumer group starts at the beginning of the stream (``consumer_id="0"``), not
     taskiq's ``"$"``. The worker re-sends recovered tasks from its startup hook, which
     taskiq-redis runs *before* it creates the group; created at ``"$"`` on a first start,
@@ -55,9 +57,9 @@ def build_broker(queue: str, redis_url: str, prefix: str) -> RedisStreamBroker:
     :rtype: RedisStreamBroker
     """
     return RedisStreamBroker(
-        redis_url,
-        queue_name=f"{prefix}:queue:{queue}",
-        consumer_group_name=f"{prefix}:{queue}-worker",
+        redis.url,
+        queue_name=redis.key(QUEUE_NAMESPACE, queue),
+        consumer_group_name=redis.key(f"{queue}{CONSUMER_GROUP_SUFFIX}"),
         consumer_id="0",
         maxlen=10_000,
     )
@@ -157,7 +159,7 @@ class TaskDispatcher:
 
 
 async def open_dispatcher(
-    queue: str, redis_url: str, prefix: str, task_model: type[BaseTaskModel]
+    queue: str, redis: RedisService, task_model: type[BaseTaskModel]
 ) -> TaskDispatcher:
     """
     Connect a process that only sends work — the web process — to one queue.
@@ -168,15 +170,13 @@ async def open_dispatcher(
 
     :param queue: Queue name, e.g. ``Queue.MIGRATION``.
     :type queue: str
-    :param redis_url: Redis the queue lives in.
-    :type redis_url: str
-    :param prefix: Key prefix shared with the cache and the progress channels.
-    :type prefix: str
+    :param redis: The Redis the queue lives in.
+    :type redis: RedisService
     :param task_model: Document type of the tasks on this queue.
     :type task_model: type[BaseTaskModel]
     :return: A dispatcher whose broker is running; ``close`` it on shutdown.
     :rtype: TaskDispatcher
     """
-    broker = build_broker(queue, redis_url, prefix)
+    broker = build_broker(queue, redis)
     await broker.startup()
     return TaskDispatcher(broker, task_model)

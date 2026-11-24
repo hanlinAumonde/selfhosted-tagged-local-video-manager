@@ -6,8 +6,8 @@ This conftest:
   ``schema.execute`` / ``schema.subscribe`` directly (no HTTP layer).
 - Provides spec'd Mock objects for every service that touches the filesystem
   (resource handler, ffmpeg, thumbnail, dir_metadata, browse_file,
-  batch_operation).  Pure-DB services (TagOperationService, SeriesService,
-  CacheService) are kept real so the tests still exercise the business logic.
+  batch_operation).  Pure-DB services (TagOperationService, SeriesService)
+  are kept real so the tests still exercise the business logic.
 """
 
 from collections.abc import AsyncGenerator
@@ -23,7 +23,6 @@ from src.platform.jobs.task_model import TaskStatus
 from src.schema.strawberry_schema import schema as gql_schema
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.browse_file_service import BrowseFileService
-from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_batch import MigrationBatchService
@@ -206,11 +205,6 @@ def mock_progress_bus() -> MagicMock:
 # -----------------------------------------------------------------------
 
 @pytest.fixture
-def real_cache_service(test_settings: Settings) -> CacheService:
-    return CacheService(config=test_settings.cache_config)
-
-
-@pytest.fixture
 def real_tag_operation_service(test_settings: Settings) -> TagOperationService:
     return TagOperationService(settings=test_settings)
 
@@ -266,7 +260,6 @@ def real_catalog_service(
 @pytest.fixture
 def graphql_context(
     test_settings: Settings,
-    real_cache_service: CacheService,
     real_tag_operation_service: TagOperationService,
     real_series_service: SeriesService,
     real_catalog_service: CatalogService,
@@ -285,7 +278,6 @@ def graphql_context(
     """Context dict matching ``src.context.get_context``'s return shape."""
     return {
         ContextEnum.SETTINGS: test_settings,
-        ContextEnum.CACHE_SERVICE: real_cache_service,
         ContextEnum.RESOURCE_HANDLER_SERVICE: mock_resource_handler_service,
         ContextEnum.FFMPEG_SERVICE: mock_ffmpeg_service,
         ContextEnum.THUMBNAIL_SERVICE: mock_thumbnail_service,

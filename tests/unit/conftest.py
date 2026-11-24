@@ -14,7 +14,6 @@ import pytest
 
 from src import config
 from src.config import Settings
-from src.platform.cache.cache_service import CacheService
 from src.platform.storage.local_fs.local_fs_handler import LocalFSResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
@@ -103,12 +102,6 @@ def local_resource_handler_service(fs_settings: Settings) -> ResourceHandlerServ
     return ResourceHandlerService(settings=fs_settings)
 
 
-@pytest.fixture
-def local_cache_service(fs_settings: Settings) -> CacheService:
-    """An in-memory CacheService for unit tests."""
-    return CacheService(config=fs_settings.cache_config)
-
-
 # -----------------------------------------------------------------------
 # ------------------------ Two-category variants -------------------------
 # -----------------------------------------------------------------------
@@ -146,7 +139,3 @@ def two_category_settings(
 def two_cat_handler_service(two_category_settings: Settings) -> ResourceHandlerService:
     return ResourceHandlerService(settings=two_category_settings)
 
-
-@pytest.fixture
-def two_cat_cache_service(two_category_settings: Settings) -> CacheService:
-    return CacheService(config=two_category_settings.cache_config)

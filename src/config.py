@@ -9,21 +9,18 @@ class CacheTTLConfig(BaseModel):
     dir_metadata: int = 300
 
 
-class RedisCacheConfig(BaseModel):
+class RedisConfig(BaseModel):
+    """The one Redis every process shares: cache entries, task queues and progress."""
+
     url: str = "redis://localhost:6379/0"
+    # Applies to every call, so a Redis that stops answering costs one timeout per call.
     socket_timeout: float = 1.0
-
-
-class CachetoolsCacheConfig(BaseModel):
-    max_size: int = 3000
+    # First segment of every key, queue and channel this application writes.
+    key_prefix: str = "video-app"
 
 
 class CacheConfig(BaseModel):
-    cache_type: Literal["redis", "cachetools"] = "cachetools"
-    key_prefix: str = "video-app"
     ttl: CacheTTLConfig = CacheTTLConfig()
-    redis: RedisCacheConfig = RedisCacheConfig()
-    cachetools: CachetoolsCacheConfig = CachetoolsCacheConfig()
 
 class PageSize(BaseModel):
     homepage_videos: int = 10
@@ -67,8 +64,6 @@ class LoggingConfig(BaseModel):
 
 
 class TaskConfig(BaseModel):
-    # Redis that carries task queues and progress between the web process and workers.
-    redis_url: str = "redis://localhost:6379/0"
     # How many migrations may copy at the same time, across every device.
     max_concurrent: int = 4
     # Copies allowed at once on one device, by storage type. Several copies on one
@@ -143,6 +138,7 @@ class Settings(BaseSettings):
     handler_config: dict[str, HandlerConfig] = Field(default_factory=dict)
     thumbnail_config: ThumbnailConfig = ThumbnailConfig()
     ROOT_PATH: Optional[str] = None
+    redis: RedisConfig = RedisConfig()
     cache_config: CacheConfig = CacheConfig()
     ffmpeg_semaphore_limit: int = 4
     io_thread_pool_size: int = 32

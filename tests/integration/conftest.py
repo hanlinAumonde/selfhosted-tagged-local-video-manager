@@ -13,14 +13,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from redis.asyncio import Redis
 
 from src.config import Settings
 from src.context import ContextEnum
 from src.schema.strawberry_schema import schema as gql_schema
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.browse_file_service import BrowseFileService
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
+from src.platform.redis.redis_service import RedisService
 from src.features.catalog.catalog_service import CatalogService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
@@ -108,10 +108,12 @@ def real_resource_handler_service(integration_settings: Settings) -> ResourceHan
 
 
 @pytest_asyncio.fixture
-async def real_cache_service(integration_settings: Settings) -> AsyncGenerator[CacheService, None]:
-    cache = CacheService(config=integration_settings.cache_config)
-    yield cache
-    await cache.close()
+async def redis_service(integration_settings: Settings) -> AsyncGenerator[RedisService, None]:
+    """The web side's Redis connection, under this test's own key prefix. The worker
+    builds a second one from the same settings, as its own process would."""
+    service = RedisService(integration_settings.redis)
+    yield service
+    await service.aclose()
 
 
 @pytest.fixture
@@ -136,12 +138,12 @@ def real_series_service() -> SeriesService:
 def real_dir_metadata_service(
     integration_settings: Settings,
     real_resource_handler_service: ResourceHandlerService,
-    real_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> DirMetadataService:
     return DirMetadataService(
         settings=integration_settings,
         resource_handler_service=real_resource_handler_service,
-        cache_service=real_cache_service,
+        cache=redis_cache,
     )
 
 
@@ -243,19 +245,11 @@ def migration_broker() -> RecordingBroker:
 
 
 @pytest_asyncio.fixture
-async def redis(redis_url: str) -> AsyncGenerator[Redis, None]:
-    client = Redis.from_url(redis_url, decode_responses=True)
-    yield client
-    await client.aclose()
-
-
-@pytest_asyncio.fixture
 async def real_progress_bus(
-    integration_settings: Settings, redis: Redis
+    integration_settings: Settings, redis_service: RedisService
 ) -> AsyncGenerator[ProgressBus, None]:
     bus = ProgressBus(
-        redis,
-        integration_settings.cache_config.key_prefix,
+        redis_service,
         watchdog_interval=integration_settings.tasks.observe_watchdog_interval,
     )
     await bus.start()
@@ -270,7 +264,6 @@ async def real_progress_bus(
 @pytest.fixture
 def integration_context(
     integration_settings: Settings,
-    real_cache_service: CacheService,
     real_resource_handler_service: ResourceHandlerService,
     mock_ffmpeg_service: MagicMock,
     mock_thumbnail_service: MagicMock,
@@ -283,11 +276,10 @@ def integration_context(
     real_migration_service: MigrationService,
     migration_broker: RecordingBroker,
     real_progress_bus: ProgressBus,
-    redis: Redis,
+    redis_service: RedisService,
 ) -> dict[ContextEnum, Any]:
     context = {
         ContextEnum.SETTINGS: integration_settings,
-        ContextEnum.CACHE_SERVICE: real_cache_service,
         ContextEnum.RESOURCE_HANDLER_SERVICE: real_resource_handler_service,
         ContextEnum.FFMPEG_SERVICE: mock_ffmpeg_service,
         ContextEnum.THUMBNAIL_SERVICE: mock_thumbnail_service,
@@ -302,9 +294,7 @@ def integration_context(
         ContextEnum.MIGRATION_DISPATCHER: TaskDispatcher(migration_broker, MigrationTaskModel),
         ContextEnum.PROGRESS_BUS: real_progress_bus,
         ContextEnum.PROGRESS_PUBLISHER: ProgressPublisher(
-            redis,
-            integration_settings.cache_config.key_prefix,
-            integration_settings.tasks.latest_frame_ttl,
+            redis_service, integration_settings.tasks.latest_frame_ttl
         ),
     }
     # A key the composition root hands the resolvers but this context lacks would only

@@ -20,7 +20,7 @@ from src.features.migration.device_slots import DeviceSlots, device_of
 from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 pytestmark = pytest.mark.unit
@@ -185,13 +185,15 @@ class TestTheSourceSurvivesUntilTheLastPhase:
         assert (shelf / "movie_a.mp4").read_bytes() == CONTENT
 
 
-def _service(settings: Settings, handler_service: ResourceHandlerService) -> MigrationService:
+def _service(
+    settings: Settings, handler_service: ResourceHandlerService, cache: RedisCache
+) -> MigrationService:
     return MigrationService(
         resource_handler_service=handler_service,
         dir_metadata_service=DirMetadataService(
             settings=settings,
             resource_handler_service=handler_service,
-            cache_service=CacheService(config=settings.cache_config),
+            cache=cache,
         ),
         series_service=SeriesService(),
         copy_slots=DeviceSlots.from_settings(settings),
@@ -256,6 +258,7 @@ class TestDeviceSlots:
     #   Then the stored status stays PENDING while the slot is held
     async def test_a_migration_between_devices_still_waits_for_its_slot(
         self, test_settings, local_resource_dir, target_dir, video_factory, task_factory, monkeypatch,
+        redis_cache,
     ):
         settings = _settings_with(
             test_settings, monkeypatch,
@@ -268,7 +271,7 @@ class TestDeviceSlots:
                 "Test-category/Other-resource": "disk-b",
             }},
         )
-        svc = _service(settings, ResourceHandlerService(settings=settings))
+        svc = _service(settings, ResourceHandlerService(settings=settings), redis_cache)
         await video_factory(name="movie_a", path=SOURCE_DB)
         task = await task_factory(
             source_path=SOURCE_DB,
@@ -289,7 +292,7 @@ class TestDeviceSlots:
     #   When a migration between two directories of that mount runs
     #   Then the stored status stays PENDING while the slot is held
     async def test_a_migration_inside_one_bucket_still_waits_for_its_slot(
-        self, test_settings, video_factory, task_factory, monkeypatch,
+        self, test_settings, video_factory, task_factory, monkeypatch, redis_cache,
     ):
         settings = _settings_with(
             test_settings, monkeypatch,
@@ -299,7 +302,7 @@ class TestDeviceSlots:
             }}}},
             tasks={"slots_per_device": {"s3": 1}},
         )
-        svc = _service(settings, ResourceHandlerService(settings=settings))
+        svc = _service(settings, ResourceHandlerService(settings=settings), redis_cache)
         source_db = "S3-category/R1/movie_a.mp4"
         await video_factory(name="movie_a", path=source_db, category="S3-category")
         task = await task_factory(

@@ -1,5 +1,6 @@
 import time
-from typing import Callable
+from typing import AsyncGenerator, Callable
+from uuid import uuid4
 
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
@@ -14,7 +15,9 @@ from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.features.migration.migration_batch_model import MigrationBatchModel
 from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.task_model import TaskStatus
-from src.config import Settings
+from src.config import RedisConfig, Settings
+from src.platform.redis.redis_cache import RedisCache
+from src.platform.redis.redis_service import RedisService
 from src.features.catalog.series_model import SeriesModel
 from src.features.catalog.video_tag_model import VideoTagModel
 from src.features.catalog.video_model import VideoModel
@@ -51,6 +54,24 @@ def redis_url(redis_container: RedisContainer) -> str:
     host = redis_container.get_container_host_ip()
     port = redis_container.get_exposed_port(redis_container.port)
     return f"redis://{host}:{port}/0"
+
+
+@pytest.fixture
+def redis_prefix() -> str:
+    """A key prefix of this test's own: the Redis container is shared by the session."""
+    return f"test-{uuid4().hex[:8]}"
+
+
+@pytest_asyncio.fixture
+async def redis_service(redis_url: str, redis_prefix: str) -> AsyncGenerator[RedisService, None]:
+    service = RedisService(RedisConfig(url=redis_url, key_prefix=redis_prefix))
+    yield service
+    await service.aclose()
+
+
+@pytest.fixture
+def redis_cache(redis_service: RedisService) -> RedisCache:
+    return RedisCache(redis_service)
 
 
 @pytest.fixture(scope="session")

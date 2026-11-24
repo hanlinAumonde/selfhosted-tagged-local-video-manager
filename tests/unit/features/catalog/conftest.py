@@ -7,7 +7,7 @@ from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.catalog_service import CatalogService
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
@@ -16,7 +16,7 @@ from src.platform.storage.resource_handler_service import ResourceHandlerService
 def catalog_svc_factory(
     fs_settings: Settings,
     local_resource_handler_service: ResourceHandlerService,
-    local_cache_service: CacheService,
+    redis_cache: RedisCache,
 ):
     """Build a catalog service around a given lock registry."""
     def _build(registry) -> CatalogService:
@@ -28,7 +28,7 @@ def catalog_svc_factory(
             dir_metadata_service=DirMetadataService(
                 settings=fs_settings,
                 resource_handler_service=local_resource_handler_service,
-                cache_service=local_cache_service,
+                cache=redis_cache,
             ),
             resource_handler_service=local_resource_handler_service,
             ffmpeg_service=ffmpeg,

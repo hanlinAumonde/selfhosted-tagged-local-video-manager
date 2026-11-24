@@ -11,7 +11,7 @@ from src.features.migration.device_slots import DeviceSlots
 from src.features.migration.migration_batch import MigrationBatchService
 from src.features.migration.migration_service import MigrationService
 from tests.unit.features.migration.batch_helpers import record_directory_refreshes
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 
@@ -48,12 +48,12 @@ async def shelving_task(video_factory, task_factory, shelf):
 def migration_svc(
     fs_settings: Settings,
     local_resource_handler_service: ResourceHandlerService,
-    local_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> MigrationService:
     dir_meta = DirMetadataService(
         settings=fs_settings,
         resource_handler_service=local_resource_handler_service,
-        cache_service=local_cache_service,
+        cache=redis_cache,
     )
     return MigrationService(
         resource_handler_service=local_resource_handler_service,
@@ -66,12 +66,12 @@ def migration_svc(
 def slotted_migration_svc(
     two_category_settings: Settings,
     two_cat_handler_service: ResourceHandlerService,
-    two_cat_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> MigrationService:
     dir_meta = DirMetadataService(
         settings=two_category_settings,
         resource_handler_service=two_cat_handler_service,
-        cache_service=two_cat_cache_service,
+        cache=redis_cache,
     )
     return MigrationService(
         resource_handler_service=two_cat_handler_service,
@@ -85,12 +85,12 @@ def slotted_migration_svc(
 def two_cat_migration_svc(
     two_category_settings: Settings,
     two_cat_handler_service: ResourceHandlerService,
-    two_cat_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> MigrationService:
     dir_meta = DirMetadataService(
         settings=two_category_settings,
         resource_handler_service=two_cat_handler_service,
-        cache_service=two_cat_cache_service,
+        cache=redis_cache,
     )
     return MigrationService(
         resource_handler_service=two_cat_handler_service,

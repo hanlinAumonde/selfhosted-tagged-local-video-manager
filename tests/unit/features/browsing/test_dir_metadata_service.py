@@ -23,14 +23,14 @@ async def test_set_and_get_metadata_round_trip(dir_svc, init_db):
     assert result == (999.0, 1700000000.0)
 
 
-async def test_set_metadata_updates_cache(dir_svc, init_db, local_cache_service):
+async def test_set_metadata_updates_cache(dir_svc, init_db, redis_cache):
     await dir_svc.set_metadata("Test-category", "a/b", 1.0, 2.0)
-    cached = await local_cache_service.get("Test-category:a/b")
+    cached = await redis_cache.get("Test-category:a/b")
     assert cached == [1.0, 2.0]
 
 
-async def test_get_metadata_serves_from_cache(dir_svc, init_db, local_cache_service):
-    await local_cache_service.set("Test-category:cached/path", (42.0, 99.0), ttl=60)
+async def test_get_metadata_serves_from_cache(dir_svc, init_db, redis_cache):
+    await redis_cache.set("Test-category:cached/path", (42.0, 99.0), ttl=60)
     result = await dir_svc.get_metadata("Test-category", "cached/path")
     assert result == (42.0, 99.0)
 
@@ -106,7 +106,7 @@ async def test_calculate_non_recursive_uses_cached_subdirs(
 
 
 async def test_calculate_serves_from_cache_when_available(
-    dir_svc, init_db, local_resource_handler_service, local_resource_dir, local_cache_service,
+    dir_svc, init_db, local_resource_handler_service, local_resource_dir, redis_cache,
 ):
     handler = local_resource_handler_service.get_handler("Test-category")
     root_fs = str(local_resource_dir).replace("\\", "/")
@@ -115,7 +115,7 @@ async def test_calculate_serves_from_cache_when_available(
     )
 
     db_path = handler.convert_to_DB_format_path(root_fs)
-    await local_cache_service.set(f"Test-category:{db_path}", (777.0, 888.0), ttl=60)
+    await redis_cache.set(f"Test-category:{db_path}", (777.0, 888.0), ttl=60)
 
     total, mtime = await dir_svc.calculate_directory_metadata(
         abs_path, skipCache=False, recursiveCalculation=True,
@@ -130,14 +130,14 @@ async def test_calculate_returns_zeros_for_null_category(dir_svc, init_db):
 
 
 async def test_get_metadata_db_hit_not_in_cache(
-    dir_svc, init_db, local_cache_service,
+    dir_svc, init_db, redis_cache,
 ):
     await dir_svc.set_metadata("Test-category", "db-only/path", 42.0, 99.0)
-    await local_cache_service.delete("Test-category:db-only/path")
+    await redis_cache.delete("Test-category:db-only/path")
 
     result = await dir_svc.get_metadata("Test-category", "db-only/path")
     assert result == (42.0, 99.0)
-    assert await local_cache_service.get("Test-category:db-only/path") == [42.0, 99.0]
+    assert await redis_cache.get("Test-category:db-only/path") == [42.0, 99.0]
 
 
 async def test_calculate_error_returns_negative_ones(

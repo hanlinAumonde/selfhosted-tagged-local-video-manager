@@ -11,7 +11,7 @@ from src.config import init_settings
 from src.constants.http import ERROR_STATUS_CODES, INTERNAL_ERROR_DETAIL
 from src.errors import InvalidRangeError
 from src.schema.strawberry_schema import schema
-from src.context import get_cache_service, get_context, init_task_infrastructure
+from src.context import get_context, get_redis_service, init_task_infrastructure
 from src.db.setup_mongo import setup_mongo
 from src.logger import get_logger, setup_logger
 from src.features.playback import video_router
@@ -92,7 +92,7 @@ def create_app():
         task_infrastructure = await init_task_infrastructure()
         yield
         await task_infrastructure.shutdown()
-        await get_cache_service(settings).close()
+        await get_redis_service(settings).aclose()
         logger.info("Application shutdown")
 
     app = FastAPI(lifespan=lifespan)

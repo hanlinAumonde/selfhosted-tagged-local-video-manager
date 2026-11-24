@@ -3,14 +3,12 @@ from enum import Enum
 import strawberry
 from typing import Annotated
 from fastapi import Depends
-from redis.asyncio import Redis
 from src.config import Settings, get_settings
 
 from src.config import Settings
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.browse_file_service import BrowseFileService
 from src.features.catalog.catalog_service import CatalogService
-from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_batch import MigrationBatchService
@@ -20,6 +18,8 @@ from src.features.migration.migration_task_model import MigrationTaskModel
 from src.workers.dispatch import Queue, TaskDispatcher, open_dispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
+from src.platform.redis.redis_cache import RedisCache
+from src.platform.redis.redis_service import RedisService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
@@ -28,7 +28,6 @@ from src.features.playback.video_stream_service import VideoStreamService
 
 class ContextEnum(Enum):
     SETTINGS = Settings
-    CACHE_SERVICE = CacheService
     RESOURCE_HANDLER_SERVICE = ResourceHandlerService
     FFMPEG_SERVICE = FFmpegService
     THUMBNAIL_SERVICE = ThumbnailService
@@ -44,7 +43,8 @@ class ContextEnum(Enum):
     PROGRESS_BUS = ProgressBus
     PROGRESS_PUBLISHER = ProgressPublisher
 
-_cache_service: CacheService | None = None
+_redis_service: RedisService | None = None
+_redis_cache: RedisCache | None = None
 _resource_handler_service: ResourceHandlerService | None = None
 _ffmpeg_service: FFmpegService | None = None
 _tag_operation_service: TagOperationService | None = None
@@ -54,18 +54,32 @@ _task_infrastructure: "TaskInfrastructure | None" = None
 _path_lock_registry: PathLockRegistry | None = None
 _thumbnail_service: ThumbnailService | None = None
 
-def get_cache_service(settings: Settings = Depends(get_settings)) -> CacheService | None:
+def get_redis_service(settings: Settings = Depends(get_settings)) -> RedisService:
     """
-    The process-wide cache, built on first use.
+    The process's one Redis connection, built on first use and closed by the app lifespan.
 
-    :param settings: The settings to build the cache from on first use.
+    :param settings: The settings to build the connection from on first use.
     :type settings: Settings
-    :rtype: CacheService
+    :rtype: RedisService
     """
-    global _cache_service
-    if _cache_service is None:
-        _cache_service = CacheService(config=settings.cache_config)
-    return _cache_service
+    global _redis_service
+    if _redis_service is None:
+        _redis_service = RedisService(settings.redis)
+    return _redis_service
+
+
+def get_redis_cache(redis: RedisService = Depends(get_redis_service)) -> RedisCache:
+    """
+    The process-wide cache, on the process's Redis connection.
+
+    :param redis: The connection the cache uses.
+    :type redis: RedisService
+    :rtype: RedisCache
+    """
+    global _redis_cache
+    if _redis_cache is None:
+        _redis_cache = RedisCache(redis)
+    return _redis_cache
 
 def get_resource_handler_service(settings: Settings = Depends(get_settings)) -> ResourceHandlerService | None:
     global _resource_handler_service
@@ -95,13 +109,13 @@ def get_series_service() -> SeriesService | None:
 
 def get_dir_metadata_service(
     settings: Settings = Depends(get_settings),
-    resource_handler_service = Depends(get_resource_handler_service), 
-    cache_service = Depends(get_cache_service)
+    resource_handler_service = Depends(get_resource_handler_service),
+    cache = Depends(get_redis_cache)
 ) -> DirMetadataService | None:
     return DirMetadataService(
-        settings=settings, 
-        resource_handler_service=resource_handler_service, 
-        cache_service=cache_service
+        settings=settings,
+        resource_handler_service=resource_handler_service,
+        cache=cache,
     )
 
 def get_thumbnail_service(
@@ -147,7 +161,7 @@ def get_path_lock_registry(
 
 def get_browse_file_service(
     settings: Settings = Depends(get_settings),
-    dir_metadata_service = Depends(get_dir_metadata_service), 
+    dir_metadata_service = Depends(get_dir_metadata_service),
     resource_handler_service = Depends(get_resource_handler_service),
     ffmpeg_service = Depends(get_ffmpeg_service),
     path_locks = Depends(get_path_lock_registry)
@@ -228,16 +242,15 @@ class TaskInfrastructure:
     its own only when it settles a task itself — a cancel of a task no worker has started.
     """
 
-    redis: Redis
     migration_dispatcher: TaskDispatcher
     progress_bus: ProgressBus
     progress_publisher: ProgressPublisher
 
     async def shutdown(self) -> None:
-        """Stop relaying progress, then close the queue and the Redis connection."""
+        """Stop relaying progress, then close the queue. The Redis connection the bus and
+        the publisher share belongs to the process and is closed by the app lifespan."""
         await self.progress_bus.stop()
         await self.migration_dispatcher.close()
-        await self.redis.aclose()
 
 
 async def init_task_infrastructure() -> TaskInfrastructure:
@@ -247,20 +260,16 @@ async def init_task_infrastructure() -> TaskInfrastructure:
     """
     global _task_infrastructure
     settings = get_settings()
-    prefix = settings.cache_config.key_prefix
+    redis = get_redis_service(settings)
 
-    redis = Redis.from_url(settings.tasks.redis_url, decode_responses=True)
-    dispatcher = await open_dispatcher(
-        Queue.MIGRATION, settings.tasks.redis_url, prefix, MigrationTaskModel
-    )
-    bus = ProgressBus(redis, prefix, watchdog_interval=settings.tasks.observe_watchdog_interval)
+    dispatcher = await open_dispatcher(Queue.MIGRATION, redis, MigrationTaskModel)
+    bus = ProgressBus(redis, watchdog_interval=settings.tasks.observe_watchdog_interval)
     await bus.start()
 
     _task_infrastructure = TaskInfrastructure(
-        redis=redis,
         migration_dispatcher=dispatcher,
         progress_bus=bus,
-        progress_publisher=ProgressPublisher(redis, prefix, settings.tasks.latest_frame_ttl),
+        progress_publisher=ProgressPublisher(redis, settings.tasks.latest_frame_ttl),
     )
     return _task_infrastructure
 
@@ -287,14 +296,13 @@ def get_video_stream_service(
     ffmpeg_service = Depends(get_ffmpeg_service)
 ) -> VideoStreamService | None:
     return VideoStreamService(
-        resourceHandlerService=resource_handler_service, 
+        resourceHandlerService=resource_handler_service,
         ffmpegService=ffmpeg_service
     )
 VideoStreamServiceDep = Annotated[VideoStreamService, Depends(get_video_stream_service)]
 
 async def get_context(
     settings: Settings = Depends(get_settings),
-    cache_service: CacheService = Depends(get_cache_service),
     resource_handler_service: ResourceHandlerService = Depends(get_resource_handler_service),
     ffmpeg_service: FFmpegService = Depends(get_ffmpeg_service),
     thumbnail_service: ThumbnailService = Depends(get_thumbnail_service),
@@ -321,7 +329,6 @@ async def get_context(
     """
     return {
         ContextEnum.SETTINGS: settings,
-        ContextEnum.CACHE_SERVICE: cache_service,
         ContextEnum.RESOURCE_HANDLER_SERVICE: resource_handler_service,
         ContextEnum.FFMPEG_SERVICE: ffmpeg_service,
         ContextEnum.THUMBNAIL_SERVICE: thumbnail_service,

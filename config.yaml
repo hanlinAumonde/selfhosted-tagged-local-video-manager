@@ -31,18 +31,17 @@ thumbnail_config:
   # Seconds the storage is skipped after a failed read or write.
   storage_retry_cooldown: 30.0
 
-cache_config:
-  cache_type: redis  # redis | cachetools
+# The one Redis every process shares: cache entries, task queues and task progress.
+# maxmemory / eviction policy belong to the Redis server: see docker-compose.yml.
+redis:
+  url: $REDIS_URL|redis://localhost:6379/0
+  socket_timeout: 1.0
   key_prefix: video-app
+
+cache_config:
   # Seconds an entry lives, per purpose; each caller passes its own value on write.
   ttl:
     dir_metadata: 300
-  redis:
-    url: $REDIS_URL|redis://localhost:6379/0
-    socket_timeout: 1.0
-    # maxmemory / eviction policy belong to the Redis server: see docker-compose.yml.
-  cachetools:
-    max_size: 3000  # max number of entries
 
 ffmpeg_semaphore_limit: 4
 # Threads for blocking storage IO (local disk, S3 requests)
@@ -81,8 +80,7 @@ validation:
 
 # Background tasks (run by the worker processes, see src/workers/worker_migration.py)
 tasks:
-  # Carries the task queues and progress frames between the web process and workers.
-  redis_url: $REDIS_URL|redis://localhost:6379/0
+  # Queues and progress frames travel through the Redis configured above.
   # Migrations copying at once, across all devices.
   max_concurrent: 4
   # Copies at once on one device, by storage type.

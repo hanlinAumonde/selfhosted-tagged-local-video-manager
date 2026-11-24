@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from redis.asyncio import Redis
 
 from src.config import Settings
+from src.platform.redis.redis_service import RedisService
 from src.workers.worker_migration import MigrationWorker
 from tests.broker_helpers import RecordingBroker
 from tests.integration.graphql_documents import CREATE_MIGRATION_TASK
@@ -66,12 +66,15 @@ def integration_settings(
 
 @pytest_asyncio.fixture
 async def migration_worker(
-    integration_settings: Settings, migration_broker: RecordingBroker, redis: Redis, init_db
+    integration_settings: Settings, migration_broker: RecordingBroker, init_db
 ) -> AsyncGenerator[MigrationWorker, None]:
+    # Its own connection, as the worker process would have: what the web side reads back
+    # (directory sizes, progress) has to travel through Redis, not through a shared client.
+    redis = RedisService(integration_settings.redis)
     worker = MigrationWorker(integration_settings, migration_broker, redis)
     yield worker
     await worker.stop()
-    await worker.cache_service.close()
+    await redis.aclose()
 
 
 @pytest.fixture

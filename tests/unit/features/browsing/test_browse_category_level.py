@@ -19,7 +19,7 @@ from src import config
 from src.config import Settings
 from src.features.browsing.browse_file_service import BrowseFileService, DirectoryEntry
 from src.features.browsing.dir_metadata_service import DirMetadataService
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
@@ -67,7 +67,7 @@ def two_mounts_handler_service(two_mounts_settings: Settings) -> ResourceHandler
 def two_mounts_browse_svc(
     two_mounts_settings: Settings,
     two_mounts_handler_service: ResourceHandlerService,
-    local_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> BrowseFileService:
     ffmpeg = MagicMock(spec=FFmpegService, name="FFmpegService")
     ffmpeg.get_video_duration = AsyncMock(return_value=120.0)
@@ -76,7 +76,7 @@ def two_mounts_browse_svc(
         dir_metadata_service=DirMetadataService(
             settings=two_mounts_settings,
             resource_handler_service=two_mounts_handler_service,
-            cache_service=local_cache_service,
+            cache=redis_cache,
         ),
         resource_handler_service=two_mounts_handler_service,
         ffmpegService=ffmpeg,

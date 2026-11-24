@@ -22,7 +22,7 @@ from tests.unit.features.migration.batch_helpers import (
     record_directory_refreshes,
 )
 from tests.broker_helpers import RecordingBroker
-from tests.unit.test_worker import redis, worker_factory  # noqa: F401  (fixtures)
+from tests.unit.test_worker import redis, redis_service, worker_factory  # noqa: F401  (fixtures)
 
 pytestmark = pytest.mark.unit
 
@@ -32,8 +32,8 @@ def worker_settings(two_category_settings: Settings, redis_url: str, monkeypatch
     # Enough copy slots per disk that two children of a batch really copy side by side;
     # otherwise the second one waits for the disk and the window is never what holds it back.
     payload = two_category_settings.model_dump()
-    payload["tasks"]["redis_url"] = redis_url
-    payload["cache_config"]["key_prefix"] = "worker-test"
+    payload["redis"]["url"] = redis_url
+    payload["redis"]["key_prefix"] = "worker-test"
     payload["tasks"]["slots_per_device"] = {"local_fs": 4, "s3": 4}
     settings = Settings.model_validate(payload)
     monkeypatch.setattr("src.config._settings", settings)
