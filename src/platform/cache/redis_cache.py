@@ -39,6 +39,13 @@ class RedisCache(BaseCache[K, V]):
 
     @classmethod
     def from_config(cls, config: CacheConfig) -> "RedisCache":
+        """
+        Build the Redis cache from the cache configuration.
+
+        :param config: The ``cache_config`` section of the settings.
+        :type config: CacheConfig
+        :rtype: RedisCache
+        """
         return cls(
             url=config.redis.url,
             socket_timeout=config.redis.socket_timeout,

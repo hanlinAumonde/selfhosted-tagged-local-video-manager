@@ -8,13 +8,12 @@ from taskiq.exceptions import SendTaskError
 from taskiq.kicker import AsyncKicker
 from taskiq_redis import RedisStreamBroker
 
+from src.constants.tasks import RUN_TASK
 from src.logger import get_logger
 from src.platform.jobs.state_machine import TaskStateMachine
 from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
 
 logger = get_logger("dispatch")
-
-RUN_TASK = "run_task"
 
 class Queue(StrEnum):
     """

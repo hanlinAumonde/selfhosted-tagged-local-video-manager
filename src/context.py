@@ -14,9 +14,10 @@ from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_batch import MigrationBatchService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.constants.tasks import MIGRATION_EXECUTOR_KEY
+from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task import MigrationTaskModel
-from src.platform.jobs.dispatch import Queue, TaskDispatcher, open_dispatcher
+from src.workers.dispatch import Queue, TaskDispatcher, open_dispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.storage.resource_handler_service import ResourceHandlerService
@@ -54,6 +55,13 @@ _path_lock_registry: PathLockRegistry | None = None
 _thumbnail_service: ThumbnailService | None = None
 
 def get_cache_service(settings: Settings = Depends(get_settings)) -> CacheService | None:
+    """
+    The process-wide cache, built on first use.
+
+    :param settings: The settings to build the cache from on first use.
+    :type settings: Settings
+    :rtype: CacheService
+    """
     global _cache_service
     if _cache_service is None:
         _cache_service = CacheService(config=settings.cache_config)
@@ -226,6 +234,7 @@ class TaskInfrastructure:
     progress_publisher: ProgressPublisher
 
     async def shutdown(self) -> None:
+        """Stop relaying progress, then close the queue and the Redis connection."""
         await self.progress_bus.stop()
         await self.migration_dispatcher.close()
         await self.redis.aclose()
@@ -251,7 +260,7 @@ async def init_task_infrastructure() -> TaskInfrastructure:
         redis=redis,
         migration_dispatcher=dispatcher,
         progress_bus=bus,
-        progress_publisher=ProgressPublisher(redis, prefix),
+        progress_publisher=ProgressPublisher(redis, prefix, settings.tasks.latest_frame_ttl),
     )
     return _task_infrastructure
 
@@ -301,6 +310,15 @@ async def get_context(
     progress_bus: ProgressBus = Depends(get_progress_bus),
     progress_publisher: ProgressPublisher = Depends(get_progress_publisher),
 ):
+    """
+    Build the GraphQL context of one request: every service, keyed by ContextEnum.
+
+    Each parameter is one service, injected by FastAPI through its ``get_*`` provider;
+    the providers decide which services are per process and which per request.
+
+    :return: ContextEnum key to service.
+    :rtype: dict[ContextEnum, Any]
+    """
     return {
         ContextEnum.SETTINGS: settings,
         ContextEnum.CACHE_SERVICE: cache_service,
@@ -321,4 +339,13 @@ async def get_context(
     }
 
 def get_context_value(info: strawberry.Info, key: ContextEnum):
+    """
+    Look up one service in a resolver's context.
+
+    :param info: The resolver's strawberry info, carrying the context ``get_context`` built.
+    :type info: strawberry.Info
+    :param key: Which service to return.
+    :type key: ContextEnum
+    :return: The service registered under ``key``.
+    """
     return info.context[key]

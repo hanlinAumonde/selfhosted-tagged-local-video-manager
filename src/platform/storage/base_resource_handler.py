@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncIterator, Callable, ClassVar
 
+from src.constants.storage import STREAM_CHUNK_SIZE
 from src.platform.storage.file_info import FileInfo
 
 if TYPE_CHECKING:
@@ -42,7 +43,14 @@ class BaseResourceHandler(ABC):
     @classmethod
     @abstractmethod
     def from_config(cls, spec: HandlerBuildSpec) -> BaseResourceHandler:
-        """Build a handler for one category from its configuration."""
+        """
+        Build a handler for one category from its configuration.
+
+        :param spec: The category, its mounts and the settings, in one envelope so every
+            handler type is built through the same signature.
+        :type spec: HandlerBuildSpec
+        :rtype: BaseResourceHandler
+        """
         ...
 
     # --- IO operations ---
@@ -179,7 +187,7 @@ class BaseResourceHandler(ABC):
         """
         ...
 
-    async def read_file_streaming(self, path: str, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
+    async def read_file_streaming(self, path: str, chunk_size: int = STREAM_CHUNK_SIZE) -> AsyncIterator[bytes]:
         """
         Read a file in a streaming manner, yielding chunks of data.
 

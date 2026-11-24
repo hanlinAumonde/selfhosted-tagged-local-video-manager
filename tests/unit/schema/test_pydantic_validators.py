@@ -7,7 +7,7 @@ from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,
     TagsOperationMappingInputModel,
 )
-from src.schema.types.pydantic_types.fileBrowe_type import RelativePathInputModel
+from src.schema.types.pydantic_types.fileBrowse_type import RelativePathInputModel
 from src.schema.types.pydantic_types.search_type import (
     VideoSearchInputModel,
     SearchKeywordModel,
@@ -106,7 +106,7 @@ class TestBatchOperationInputModel:
 
 
 # -----------------------------------------------------------------------
-# fileBrowe_type.py
+# fileBrowse_type.py
 # -----------------------------------------------------------------------
 
 class TestRelativePathInputModel:

@@ -19,7 +19,7 @@ import pytest_asyncio
 
 from src.config import Settings
 from src.context import ContextEnum
-from src.features.migration.migration_task import TaskStatus
+from src.platform.jobs.task_model import TaskStatus
 from src.schema.strawberry_schema import schema as gql_schema
 from src.features.browsing.batch_operation_service import BatchOperationService
 from src.features.browsing.browse_file_service import BrowseFileService
@@ -27,9 +27,10 @@ from src.platform.cache.cache_service import CacheService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.features.migration.migration_batch import MigrationBatchService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.constants.tasks import MIGRATION_EXECUTOR_KEY
+from src.features.migration.migration_service import MigrationService
 from src.platform.jobs.path_locks import PathLockRegistry
-from src.platform.jobs.dispatch import TaskDispatcher
+from src.workers.dispatch import TaskDispatcher
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService

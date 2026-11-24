@@ -247,3 +247,41 @@ async def test_missing_thumbnail_is_not_treated_as_an_outage(
     assert storage.read_file.await_count == 3
     # And each regenerated thumbnail is written back to storage
     assert storage.write_file.await_count == 3
+
+
+async def test_service_built_without_a_breaker_takes_its_cooldown_from_the_settings(
+    handler_svc, ffmpeg_svc, video_factory,
+):
+    """
+    Scenario: the storage retry cooldown is a setting
+      Given a thumbnail service built without a breaker
+      And thumbnail_config.storage_retry_cooldown is 0
+      And its storage is configured but every read raises
+      And two videos whose thumbnails were stored earlier
+      When both thumbnails are requested one after the other
+      Then storage was read for both of them
+    """
+    svc = ThumbnailService(
+        resource_handler_service=handler_svc,
+        ffmpeg_service=ffmpeg_svc,
+        settings=Settings.model_validate({
+            "resource_paths": {"Test-category": {"Test-resource": "/test"}},
+            "thumbnail_config": {
+                "storage_category": "Test-category",
+                "storage_pseudo_name": "Test-resource",
+                "storage_retry_cooldown": 0,
+            },
+        }),
+    )
+    storage = MagicMock(spec=LocalFSResourceHandler, name="storage_handler")
+    storage.join_path.side_effect = lambda *parts: "/".join(parts)
+    storage.read_file.side_effect = ConnectionError("storage unreachable")
+    svc._storage_handler = storage
+    first, second = [
+        await _video_with_stored_thumbnail(video_factory, name) for name in ("a", "b")
+    ]
+
+    for video in (first, second):
+        await _fetch(svc, video)
+
+    assert storage.read_file.await_count == 2

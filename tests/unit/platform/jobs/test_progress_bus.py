@@ -18,6 +18,8 @@ from src.platform.jobs.task_model import TaskStatus
 
 pytestmark = pytest.mark.unit
 
+LATEST_FRAME_TTL = 60
+
 
 def _frame(task_id: str, status: TaskStatus, current: int = 0, total: int = 100) -> ProgressFrame:
     return ProgressFrame(task_id=task_id, status=status.value, current=current, total=total)
@@ -50,7 +52,7 @@ def prefix() -> str:
 
 @pytest.fixture
 def publisher(redis, prefix) -> ProgressPublisher:
-    return ProgressPublisher(redis, prefix)
+    return ProgressPublisher(redis, prefix, LATEST_FRAME_TTL)
 
 
 @pytest_asyncio.fixture
@@ -81,7 +83,7 @@ class TestPublisher:
     async def test_published_frame_is_stored_as_latest_with_a_short_ttl(self, redis):
         # Given a ProgressPublisher on prefix "pfx"
         prefix = f"pfx-{uuid.uuid4().hex[:8]}"
-        publisher = ProgressPublisher(redis, prefix)
+        publisher = ProgressPublisher(redis, prefix, LATEST_FRAME_TTL)
 
         # When it publishes a PROCESSING frame for task "t1" at 40 of 100
         await publisher.publish(_frame("t1", TaskStatus.PROCESSING, 40))
@@ -312,3 +314,19 @@ class TestStaleLatestFrame:
         frames = await _rest(bus.observe("t1", snapshots))
 
         assert [(f.status, f.current) for f in frames] == [("COMPLETED", 100)]
+
+
+class TestConfiguredLatestFrameTtl:
+    async def test_the_latest_frame_lives_as_long_as_the_publisher_is_told(self, redis):
+        """
+        Scenario: how long the latest frame is kept is set by whoever builds the publisher
+          Given a ProgressPublisher built with a latest-frame TTL of 5 seconds
+          When it publishes a PROCESSING frame for task "t1"
+          Then the latest-frame key of "t1" expires within 5 seconds
+        """
+        prefix = f"pfx-{uuid.uuid4().hex[:8]}"
+        publisher = ProgressPublisher(redis, prefix, latest_frame_ttl=5)
+
+        await publisher.publish(_frame("t1", TaskStatus.PROCESSING, 40))
+
+        assert 0 < await redis.ttl(f"{prefix}:task:t1:latest") <= 5

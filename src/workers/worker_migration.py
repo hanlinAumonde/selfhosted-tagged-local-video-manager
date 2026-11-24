@@ -1,17 +1,3 @@
-"""
-Assembly root of the migration worker process.
-
-Run exactly one of these processes per queue — recovery relies on it (see
-``TaskStateMachine.plan_recovery``)::
-
-    taskiq worker src.worker:create_broker --workers 1 --ack-type when_received \
-        --max-async-tasks 16
-
-``--max-async-tasks`` is not the concurrency limit: tasks waiting for a copy slot also
-occupy one, so it must stay well above ``tasks.max_concurrent`` or tasks for an idle
-disk queue up behind tasks waiting for a busy one. The real limits are ``DeviceSlots``.
-"""
-
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -30,7 +16,8 @@ from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task import MigrationTaskModel
 from src.logger import get_logger, setup_logger
 from src.platform.cache.cache_service import CacheService
-from src.platform.jobs.dispatch import RUN_TASK, Queue, TaskDispatcher, build_broker
+from src.constants.tasks import RUN_TASK
+from src.workers.dispatch import Queue, TaskDispatcher, build_broker
 from src.platform.jobs.progress_bus import ProgressPublisher
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
@@ -65,10 +52,12 @@ class MigrationWorker:
             progress_flush_interval=settings.tasks.progress_flush_interval,
             copy_slots=DeviceSlots.from_settings(settings),
         )
-        self.publisher = ProgressPublisher(redis, settings.cache_config.key_prefix)
+        self.publisher = ProgressPublisher(
+            redis, settings.cache_config.key_prefix, settings.tasks.latest_frame_ttl
+        )
         self.dispatcher = TaskDispatcher(broker, MigrationTaskModel)
         self.batches = MigrationBatchService(self.service)
-        self.window = BatchWindow()
+        self.window = BatchWindow(settings.tasks.batch_window)
         self._reconcile_interval = settings.tasks.reconcile_interval
         self._reconciler: asyncio.Task | None = None
 
@@ -121,6 +110,7 @@ class MigrationWorker:
         self._reconciler = asyncio.create_task(self._reconcile_forever(), name="reconcile")
 
     async def stop(self) -> None:
+        """Stop the reconcile loop and close the worker's cache connection."""
         if self._reconciler is not None:
             self._reconciler.cancel()
             with suppress(asyncio.CancelledError):
@@ -144,7 +134,7 @@ def create_broker() -> AsyncBroker:
     Build the migration queue's broker with the worker wired onto it.
 
     A factory rather than a module-level broker, so importing this module does not load
-    the configuration; the taskiq CLI calls it when given ``src.worker:create_broker``.
+    the configuration; the taskiq CLI calls it when given ``src.workers.worker_migration:create_broker``.
 
     :return: The broker the taskiq worker should listen on.
     :rtype: AsyncBroker

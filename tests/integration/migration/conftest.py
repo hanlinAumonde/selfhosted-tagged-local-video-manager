@@ -14,7 +14,7 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from src.config import Settings
-from src.worker import MigrationWorker
+from src.workers.worker_migration import MigrationWorker
 from tests.broker_helpers import RecordingBroker
 from tests.integration.graphql_documents import CREATE_MIGRATION_TASK
 from tests.integration.helpers import assert_no_errors, build_integration_settings

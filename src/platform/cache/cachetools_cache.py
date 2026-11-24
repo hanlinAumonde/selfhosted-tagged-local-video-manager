@@ -23,6 +23,13 @@ class CachetoolsCache(BaseCache[K, V]):
 
     @classmethod
     def from_config(cls, config: CacheConfig) -> "CachetoolsCache":
+        """
+        Build the in-process cache from the cache configuration.
+
+        :param config: The ``cache_config`` section of the settings.
+        :type config: CacheConfig
+        :rtype: CachetoolsCache
+        """
         return cls(max_size=config.cachetools.max_size, key_prefix=config.key_prefix)
 
     def _key(self, key: K) -> str:

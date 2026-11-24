@@ -54,6 +54,10 @@ class ValidationConfig(BaseModel):
     page_number_min: int = 1
     page_number_max: int = 10000
     series_name_max_length: int = 100
+    # Each source of a batch is checked and inserted one by one, so this bounds how long
+    # a single batch request takes.
+    migration_batch_max_size: int = 500
+    migration_page_size_max: int = 100
 
 
 class LoggingConfig(BaseModel):
@@ -84,6 +88,11 @@ class TaskConfig(BaseModel):
     observe_watchdog_interval: float = 10.0
     # How often (seconds) a worker re-sends PENDING tasks whose message may have been lost.
     reconcile_interval: float = 300.0
+    # Children of one batch a worker runs at once. Device slots already bound the real
+    # concurrency; the window only keeps one batch from taking every global slot.
+    batch_window: int = 2
+    # Seconds a task's latest progress frame is kept for observers that attach late.
+    latest_frame_ttl: int = 60
 
 
 class S3HandlerConfig(BaseModel):
@@ -123,6 +132,8 @@ HandlerConfig = Annotated[
 class ThumbnailConfig(BaseModel):
     storage_category: str = ""
     storage_pseudo_name: str = ""
+    # Seconds the thumbnail storage is skipped after it failed once.
+    storage_retry_cooldown: float = 30.0
 
 
 class Settings(BaseSettings):
@@ -149,10 +160,15 @@ class Settings(BaseSettings):
         The default lives here rather than in the dispatcher: which backend serves
         an unconfigured category is a statement about configuration, and the
         dispatcher should only ever look up whatever type it is handed.
+
+        :param category: A category name from ``resource_paths``.
+        :type category: str
+        :rtype: HandlerConfig
         """
         return self.handler_config.get(category) or LocalFSCategoryConfig()
 
     def get_valid_categories(self) -> list[str]:
+        """The configured category names, in the order ``resource_paths`` lists them."""
         return list(self.resource_paths.keys())
 
     def get_all_host_paths(self) -> set[str]:
@@ -185,6 +201,13 @@ class Settings(BaseSettings):
 _settings : Settings | None = None
 
 def init_settings():
+    """
+    Load the settings once per process from config.yaml, ``.env`` and the environment,
+    in rising order of precedence.
+
+    :return: The process-wide settings; later calls return the same instance.
+    :rtype: Settings
+    """
     global _settings
     if _settings is None:
         import os
@@ -194,6 +217,12 @@ def init_settings():
     return _settings
 
 def get_settings() -> Settings:
+    """
+    The settings loaded by ``init_settings``.
+
+    :raises RuntimeError: If ``init_settings`` has not run in this process.
+    :rtype: Settings
+    """
     if _settings is None:
         raise RuntimeError("Settings have not been initialized. Call init_settings() first.")
     return _settings

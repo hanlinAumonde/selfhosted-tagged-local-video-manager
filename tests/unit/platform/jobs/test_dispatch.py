@@ -10,7 +10,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from taskiq import InMemoryBroker
 
-from src.platform.jobs.dispatch import Queue, TaskDispatcher, build_broker
+from src.workers.dispatch import Queue, TaskDispatcher, build_broker
 from src.platform.jobs.task_model import TaskStatus
 from tests.broker_helpers import RecordingBroker
 from tests.unit.platform.jobs.reindex import ReindexStateMachine, ReindexTaskModel

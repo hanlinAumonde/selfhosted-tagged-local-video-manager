@@ -3,12 +3,7 @@ import pymongo
 from beanie import PydanticObjectId
 from pymongo import IndexModel
 
-from src.platform.jobs.task_model import BaseTaskModel, TaskStatus
-
-# TaskStatus used to be defined here. Re-exported so the many modules that import it from
-# this path keep working while the task template is being generalised.
-__all__ = ["MigrationTaskModel", "TaskStatus"]
-
+from src.platform.jobs.task_model import BaseTaskModel
 
 class MigrationTaskModel(BaseTaskModel):
     # Path info (DB format)

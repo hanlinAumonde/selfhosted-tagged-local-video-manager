@@ -18,7 +18,8 @@ from src.features.catalog.series_service import SeriesService
 from src.features.catalog.video import VideoModel
 from src.features.migration.device_slots import DeviceSlots, device_of
 from src.features.migration.migration_service import MigrationService
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.cache.cache_service import CacheService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 

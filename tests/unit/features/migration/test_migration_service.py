@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.features.catalog.video import VideoModel
 from src.errors import InputValidationError
 from src.platform.storage.absolute_path import AbsolutePath

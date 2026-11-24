@@ -2,20 +2,7 @@ import sys
 from pathlib import Path
 from loguru import logger
 
-
-CONSOLE_FORMAT = (
-    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-    "<level>{level: <8}</level> | "
-    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-    "<level>{message}</level>"
-)
-
-FILE_FORMAT = (
-    "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
-    "{level: <8} | "
-    "{name}:{function}:{line} | "
-    "{message}"
-)
+from src.constants.log import CONSOLE_FORMAT, FILE_FORMAT
 
 
 def console_filter(record: dict) -> bool:
@@ -38,12 +25,16 @@ def setup_logger(
     """
     Configure the logging system
 
-    Args:
-        log_dir: Directory for log files
-        console_format: Console output format
-        file_format: File output format
-        rotation: Log rotation size
-        retention: Log retention time
+    :param log_dir: Directory for log files
+    :type log_dir: str | Path
+    :param console_format: Console output format
+    :type console_format: str
+    :param file_format: File output format
+    :type file_format: str
+    :param rotation: Log rotation size
+    :type rotation: str
+    :param retention: Log retention time
+    :type retention: str
     """
     logger.remove()
 
@@ -76,11 +67,9 @@ def get_logger(name: str = None):
     """
     Get a logger bound with the module name
 
-    Args:
-        name: Module name, e.g., "video_stream_resolver"
-
-    Returns:
-        Logger instance bound with the module name
+    :param name: Module name, e.g., "video_stream_resolver"
+    :type name: str
+    :return: Logger instance bound with the module name
     """
     if name:
         return logger.bind(name=name)

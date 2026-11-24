@@ -8,7 +8,8 @@ from src.features.browsing.browse_file_service import BrowseFileService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.constants.tasks import MIGRATION_EXECUTOR_KEY
+from src.features.migration.migration_service import MigrationService
 from src.platform.cache.cache_service import CacheService
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.media.ffmpeg_service import FFmpegService

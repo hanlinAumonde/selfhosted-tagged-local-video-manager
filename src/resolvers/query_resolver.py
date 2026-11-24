@@ -81,6 +81,8 @@ async def resolve_get_top_tags(info: strawberry.Info) -> list[VideoTag]:
     """
     Resolve function to retrieve the top video tags.
 
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: List of top video tags.
     :rtype: list[VideoTag]
     """
@@ -101,6 +103,8 @@ async def resolve_get_suggestions(input: SuggestionInput, info: strawberry.Info)
 
     :param input: Input containing the keyword and suggestion type.
     :type input: SuggestionInput
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: Suggestion results.
     :rtype: SuggestionResults
     """
@@ -121,6 +125,8 @@ async def resolve_get_video_by_id(videoId: strawberry.ID, info: strawberry.Info)
 
     :param videoId: The ID of the video to retrieve.
     :type videoId: strawberry.ID
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: The video corresponding to the given ID.
     :rtype: Video
     """
@@ -208,6 +214,8 @@ async def resolve_search_series_by_prefix(prefix: str, limit: int, info: strawbe
     :type prefix: str
     :param limit: The maximum number of series names to return.
     :type limit: int
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: List of series names matching the keyword.
     :rtype: list[str]
     """
@@ -228,6 +236,8 @@ async def resolve_get_series_videos(name: str, info: strawberry.Info) -> list[Vi
 
     :param name: The name of the series to retrieve videos for.
     :type name: str
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: List of videos in the specified series.
     :rtype: list[Video]
     """
@@ -257,6 +267,8 @@ async def resolve_directory_metadata(input: RelativePathInput, info: strawberry.
 
     :param input: The relative path input of the directory.
     :type input: RelativePathInput
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: Directory metadata result containing total size and last modified time.
     :rtype: DirectoryMetadataResult
     """

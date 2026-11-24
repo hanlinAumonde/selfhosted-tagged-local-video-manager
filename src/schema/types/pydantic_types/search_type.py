@@ -2,9 +2,7 @@ import re
 from typing import Optional
 from pydantic import BaseModel, field_validator
 from src.config import get_settings
-
-# Regex metacharacters that need escaping for MongoDB $regex
-REGEX_SPECIAL_CHARS = r'\.*+?[](){}|^$'
+from src.constants.schema import REGEX_SPECIAL_CHARS
 
 def escape_unescaped(text: str, special_chars: str) -> str:
     pattern = rf'(?<!\\)(?:\\\\)*([{re.escape(special_chars)}])'
@@ -33,6 +31,12 @@ def validate_tag_list(v: list[str]) -> list[str]:
     Shared rather than written per input model: every surface that filters by tag is
     filtering the same field, so a tag that is too long in one place must be too long in
     all of them.
+
+    :param v: The tags to check.
+    :type v: list[str]
+    :raises ValueError: If there are too many tags, or one is too long.
+    :return: The tags, unchanged.
+    :rtype: list[str]
     """
     validation = get_settings().validation
 

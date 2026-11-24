@@ -48,7 +48,8 @@ async def test_get_video_by_id_reports_migration_lock(execute_gql, video_factory
     """A video mid-migration is still returned, but flagged so the UI can block playback."""
     import time
 
-    from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+    from src.features.migration.migration_task import MigrationTaskModel
+    from src.platform.jobs.task_model import TaskStatus
 
     video = await video_factory(name="moving")
     now = time.time()

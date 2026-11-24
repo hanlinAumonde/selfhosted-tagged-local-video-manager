@@ -28,6 +28,8 @@ handler_config:
 thumbnail_config:
   storage_category: S3-resource
   storage_pseudo_name: Resource-1
+  # Seconds the storage is skipped after a failed read or write.
+  storage_retry_cooldown: 30.0
 
 cache_config:
   cache_type: redis  # redis | cachetools
@@ -62,6 +64,7 @@ video_extensions:
   - .m4v
   - .mpg
   - .mpeg
+  - .ts
 
 # Validation rules (sync with frontend environment.ts)
 validation:
@@ -73,8 +76,10 @@ validation:
   page_number_min: 1
   page_number_max: 10000
   series_name_max_length: 100
+  migration_batch_max_size: 500
+  migration_page_size_max: 100
 
-# Background tasks (run by the worker processes, see src/worker.py)
+# Background tasks (run by the worker processes, see src/workers/worker_migration.py)
 tasks:
   # Carries the task queues and progress frames between the web process and workers.
   redis_url: $REDIS_URL|redis://localhost:6379/0
@@ -100,6 +105,10 @@ tasks:
   progress_flush_interval: 1.0
   observe_watchdog_interval: 10.0
   reconcile_interval: 300.0
+  # Children of one batch run at once; keeps one batch from taking every slot.
+  batch_window: 2
+  # Seconds the latest progress frame of a task is kept for late observers.
+  latest_frame_ttl: 60
 
 # Logging config
 logging:

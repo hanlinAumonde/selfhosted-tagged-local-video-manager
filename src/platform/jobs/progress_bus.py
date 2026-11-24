@@ -14,10 +14,6 @@ from src.platform.jobs.state_machine import TaskStateMachine
 
 logger = get_logger("progress_bus")
 
-#: Seconds the latest frame outlives its task's last report. Long enough for a client
-#: that reconnects mid-task; short enough that nothing has to clean it up.
-LATEST_FRAME_TTL = 60
-
 #: Looks up a task's stored state, for observers that have no live frame to start from.
 SnapshotFn = Callable[[str], Awaitable[ProgressFrame | None]]
 
@@ -74,15 +70,20 @@ class ProgressPublisher:
     rather than with the database's throttled copy.
     """
 
-    def __init__(self, redis: Redis, prefix: str):
+    def __init__(self, redis: Redis, prefix: str, latest_frame_ttl: int):
         """
         :param redis: Client for the Redis the web process subscribes to.
         :type redis: Redis
         :param prefix: Key prefix shared with the web process, e.g. ``"video-app"``.
         :type prefix: str
+        :param latest_frame_ttl: Seconds the latest frame outlives its task's last report.
+            Long enough for a client that reconnects mid-task; short enough that nothing
+            has to clean it up.
+        :type latest_frame_ttl: int
         """
         self._redis = redis
         self._prefix = prefix
+        self._latest_frame_ttl = latest_frame_ttl
 
     async def publish(self, frame: ProgressFrame, batch_id: str | None = None) -> None:
         """
@@ -104,7 +105,7 @@ class ProgressPublisher:
                 pipe.publish(_progress_channel(self._prefix, frame.task_id), payload)
                 if batch_id is not None:
                     pipe.publish(_batch_channel(self._prefix, batch_id), payload)
-                pipe.set(_latest_key(self._prefix, frame.task_id), payload, ex=LATEST_FRAME_TTL)
+                pipe.set(_latest_key(self._prefix, frame.task_id), payload, ex=self._latest_frame_ttl)
                 await pipe.execute()
         except (RedisError, OSError) as e:
             logger.warning(f"Could not publish progress for task {frame.task_id}: {e}")

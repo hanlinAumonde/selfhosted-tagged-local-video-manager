@@ -26,7 +26,7 @@ from src.schema.types.migration_type import (
 )
 from src.features.migration.migration_batch import BatchSummary, MigrationBatchService
 from src.features.migration.migration_service import MigrationService
-from src.platform.jobs.dispatch import TaskDispatcher
+from src.workers.dispatch import TaskDispatcher
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.platform.jobs.task_model import TaskStatus
 

@@ -3,9 +3,11 @@ directories get refreshed. Shared by the batch service tests and the worker test
 
 import time
 
-from src.features.migration.migration_batch import MigrationBatchModel
+from src.features.migration.migration_batch_model import MigrationBatchModel
 from src.features.migration.migration_service import MigrationService
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
+
 
 SOURCE_ROOT = "Test-category/Test-resource"
 TARGET_ROOT = "Target-category/Target-resource"

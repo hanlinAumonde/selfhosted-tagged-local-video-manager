@@ -1,6 +1,6 @@
 from taskiq import InMemoryBroker
 
-from src.platform.jobs.dispatch import RUN_TASK
+from src.constants.tasks import RUN_TASK
 
 
 class RecordingBroker(InMemoryBroker):

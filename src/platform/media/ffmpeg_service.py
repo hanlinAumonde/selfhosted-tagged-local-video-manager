@@ -3,9 +3,12 @@ from asyncio.subprocess import Process
 import os
 from typing import AsyncIterator
 from src.logger import get_logger
+from src.constants.media import THUMBNAIL_SEEK_SECONDS
+from src.constants.storage import STREAM_CHUNK_SIZE
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 
 logger = get_logger("ffmpeg_service")
+
 
 class FFmpegService:
 
@@ -34,9 +37,9 @@ class FFmpegService:
             ffmpeg_input = handler.get_ffmpeg_accessible_path(fs_path)
             if ffmpeg_input:
                 try:
-                    return await self._run_thumbnail_command(ffmpeg_input, ss=10)
+                    return await self._run_thumbnail_command(ffmpeg_input, ss=THUMBNAIL_SEEK_SECONDS)
                 except Exception as e:
-                    logger.warning(f"Thumbnail at 10s failed for {fs_path}: {e}, retrying at 0s")
+                    logger.warning(f"Thumbnail at {THUMBNAIL_SEEK_SECONDS}s failed for {fs_path}: {e}, retrying at 0s")
                     return await self._run_thumbnail_command(ffmpeg_input, ss=0)
             else:
                 return await self._run_thumbnail_piped(handler, fs_path)
@@ -88,7 +91,7 @@ class FFmpegService:
             "ffmpeg",
             "-loglevel", "error",
             "-i", "pipe:0",
-            "-ss", "10",
+            "-ss", str(THUMBNAIL_SEEK_SECONDS),
             "-frames:v", "1",
             "-f", "image2",
             "-vcodec", "mjpeg",
@@ -109,7 +112,16 @@ class FFmpegService:
     # --- Duration extraction ---
 
     async def get_video_duration(self, handler: BaseResourceHandler, fs_path: str) -> float:
-        """Get video duration in seconds using ffprobe."""
+        """
+        Get video duration in seconds using ffprobe.
+
+        :param handler: The resource handler to access the video file.
+        :type handler: BaseResourceHandler
+        :param fs_path: The file system path to the video file.
+        :type fs_path: str
+        :return: The duration, or 0.0 when ffprobe cannot read one.
+        :rtype: float
+        """
         async with self._semaphore:
             try:
                 ffmpeg_input = handler.get_ffmpeg_accessible_path(fs_path)
@@ -234,7 +246,7 @@ class FFmpegService:
         """
         try:
             while True:
-                chunk = await process.stdout.read(1024 * 1024)
+                chunk = await process.stdout.read(STREAM_CHUNK_SIZE)
                 if not chunk:
                     break
                 yield chunk
@@ -273,9 +285,8 @@ class FFmpegService:
                 raise FileNotFoundError(fs_path)
             file_size = int(file_info.size)
             offset = 0
-            chunk_size = 1024 * 1024
             while offset < file_size:
-                length = min(chunk_size, file_size - offset)
+                length = min(STREAM_CHUNK_SIZE, file_size - offset)
                 chunk = await handler.read_file_chunk(fs_path, offset, length)
                 if not chunk:
                     break

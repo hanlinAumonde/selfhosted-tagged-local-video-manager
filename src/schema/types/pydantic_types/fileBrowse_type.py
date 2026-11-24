@@ -1,10 +1,7 @@
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from src.config import get_settings
+from src.constants.storage import NAME_SEPARATORS
 from src.schema.types.pydantic_types.search_type import SearchKeywordModel, validate_tag_list
-
-#: Characters that would make a directory name address something other than one child of
-#: the directory the request is about.
-_NAME_SEPARATORS = ("/", "\\")
 
 
 class RelativePathInputModel(BaseModel):
@@ -98,7 +95,7 @@ class CreateDirectoryInputModel(BaseModel):
         cleaned = (v or "").strip()
         if not cleaned:
             raise ValueError("name should not be blank")
-        if any(separator in cleaned for separator in _NAME_SEPARATORS):
+        if any(separator in cleaned for separator in NAME_SEPARATORS):
             raise ValueError("name should not contain a path separator")
         if cleaned in (".", ".."):
             raise ValueError("name should not be a relative path reference")

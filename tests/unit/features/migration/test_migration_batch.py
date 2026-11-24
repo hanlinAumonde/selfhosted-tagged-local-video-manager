@@ -14,8 +14,10 @@ Fake tree (``local_resource_dir``)::
 import pytest
 
 from src.errors import InputValidationError
-from src.features.migration.migration_batch import BatchWindow, MigrationBatchModel
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_batch import BatchWindow
+from src.features.migration.migration_batch_model import MigrationBatchModel
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.absolute_path import AbsolutePath
 from tests.unit.features.migration.batch_helpers import (
     SOURCE_ROOT,
@@ -582,7 +584,7 @@ class TestBatchWindow:
           Then "a" and "b" are admitted
           And "c" is refused
         """
-        window = BatchWindow()
+        window = BatchWindow(2)
 
         assert [window.admit("B", child) for child in ("a", "b", "c")] == [True, True, False]
 
@@ -594,7 +596,7 @@ class TestBatchWindow:
           Then it is refused
           And the window still holds only "a" for batch "B"
         """
-        window = BatchWindow()
+        window = BatchWindow(2)
         window.admit("B", "a")
 
         assert window.admit("B", "a") is False
@@ -608,7 +610,7 @@ class TestBatchWindow:
           Then "c" is admitted
           And the window holds "b" and "c" for batch "B"
         """
-        window = BatchWindow()
+        window = BatchWindow(2)
         window.admit("B", "a")
         window.admit("B", "b")
 
@@ -624,7 +626,7 @@ class TestBatchWindow:
           When child "x" of batch "B2" asks to be admitted
           Then "x" is admitted
         """
-        window = BatchWindow()
+        window = BatchWindow(2)
         window.admit("B1", "a")
         window.admit("B1", "b")
 

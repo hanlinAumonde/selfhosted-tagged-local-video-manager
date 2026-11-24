@@ -9,7 +9,8 @@ from beanie.operators import Set
 
 from src.errors import InputValidationError
 from src.features.catalog.video import VideoModel
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 
 pytestmark = pytest.mark.unit
 

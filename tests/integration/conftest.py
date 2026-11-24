@@ -27,9 +27,10 @@ from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 from src.features.catalog.series_service import SeriesService
 from src.features.migration.migration_batch import MigrationBatchService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
+from src.constants.tasks import MIGRATION_EXECUTOR_KEY
+from src.features.migration.migration_service import MigrationService
 from src.features.migration.migration_task import MigrationTaskModel
-from src.platform.jobs.dispatch import TaskDispatcher
+from src.workers.dispatch import TaskDispatcher
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.jobs.progress_bus import ProgressBus, ProgressPublisher
 from src.features.catalog.tag_operation_service import TagOperationService
@@ -301,7 +302,9 @@ def integration_context(
         ContextEnum.MIGRATION_DISPATCHER: TaskDispatcher(migration_broker, MigrationTaskModel),
         ContextEnum.PROGRESS_BUS: real_progress_bus,
         ContextEnum.PROGRESS_PUBLISHER: ProgressPublisher(
-            redis, integration_settings.cache_config.key_prefix
+            redis,
+            integration_settings.cache_config.key_prefix,
+            integration_settings.tasks.latest_frame_ttl,
         ),
     }
     # A key the composition root hands the resolvers but this context lacks would only

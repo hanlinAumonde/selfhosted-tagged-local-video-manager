@@ -12,7 +12,8 @@ import json
 import pytest
 
 from src.config import Settings
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from tests.unit.features.migration.batch_helpers import (
     SOURCE_ROOT,
     TARGET_ROOT,
@@ -101,6 +102,40 @@ class TestBatchWindowInTheWorker:
         finally:
             release.set()
             await asyncio.gather(*runs)
+
+    async def test_the_window_size_comes_from_the_configuration(
+        self, worker_settings, worker_factory, video_factory, task_factory, monkeypatch,
+    ):
+        """
+        Scenario: how many children of a batch the worker holds is a setting
+          Given tasks.batch_window is 1
+          And a batch with PENDING children "movie_a.mp4" and "movie_b.mp4"
+          And the copy of "movie_a.mp4" is blocked mid-way
+          When the worker receives both children
+          Then "movie_a.mp4" is PROCESSING
+          And "movie_b.mp4" is still PENDING
+        """
+        payload = worker_settings.model_dump()
+        payload["tasks"]["batch_window"] = 1
+        settings = Settings.model_validate(payload)
+        monkeypatch.setattr("src.config._settings", settings)
+        await _videos_for(video_factory, "movie_a.mp4", "movie_b.mp4")
+        batch = await make_batch()
+        a = await add_child(task_factory, batch, "movie_a")
+        b = await add_child(task_factory, batch, "movie_b")
+        worker = worker_factory(settings)
+        release = _block_copies(worker, {"movie_a"})
+
+        run_a = asyncio.create_task(worker.run(str(a.id)))
+        try:
+            await _until_status(a, TaskStatus.PROCESSING)
+
+            await asyncio.wait_for(worker.run(str(b.id)), timeout=2)
+
+            assert (await MigrationTaskModel.get(b.id)).status == TaskStatus.PENDING
+        finally:
+            release.set()
+            await run_a
 
     async def test_a_task_outside_any_batch_is_not_held_back_by_a_busy_batch(
         self, worker_factory, video_factory, task_factory,

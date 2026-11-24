@@ -77,6 +77,14 @@ class DeviceSlots:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "DeviceSlots":
+        """
+        Build the slots a worker copies with: the global limit from ``tasks.max_concurrent``,
+        per-device limits resolved from the same settings.
+
+        :param settings: The process settings.
+        :type settings: Settings
+        :rtype: DeviceSlots
+        """
         return cls(global_limit=settings.tasks.max_concurrent, settings=settings)
 
     def devices_of(self, *db_paths: str) -> list[Device]:

@@ -1,36 +1,23 @@
 from dataclasses import dataclass
 import time
 
-from beanie import Document, PydanticObjectId
+from beanie import PydanticObjectId
 from beanie.operators import NotIn
 from bson import ObjectId
 from bson.errors import InvalidId
 
 from src.errors import InputValidationError
+from src.features.migration.migration_batch_model import MigrationBatchModel
 from src.features.migration.migration_service import MigrationPreflightResult, MigrationService
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task import MigrationTaskModel
 from src.logger import get_logger
 from src.platform.jobs.state_machine import TaskStateMachine
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.absolute_path import AbsolutePath
 
 logger = get_logger("migration_batch")
 
-#: Children of one batch the worker holds at once. Device slots already bound the real
-#: concurrency; the window only keeps one batch from taking every global slot.
-BATCH_WINDOW = 2
-
 _TERMINAL = [s.value for s in TaskStateMachine.TERMINAL_STATUSES]
-
-
-class MigrationBatchModel(Document):
-    target_dir: str
-    target_category: str
-    conflict_strategy: str | None = None
-    created_at: float
-
-    class Settings:
-        name = "migration_batches"
-
 
 @dataclass
 class BatchPreflightResult:
@@ -68,6 +55,7 @@ class BatchSummary:
 
     @property
     def settled(self) -> bool:
+        """Whether no child of the batch is still waiting or running."""
         return self.active == 0
 
 
@@ -79,7 +67,7 @@ class BatchWindow:
     is all that is held anywhere.
     """
 
-    def __init__(self, size: int = BATCH_WINDOW):
+    def __init__(self, size: int):
         self._size = size
         self._held: dict[str, set[str]] = {}
 
@@ -103,6 +91,15 @@ class BatchWindow:
         return True
 
     def release(self, batch_id: str, task_id: str) -> None:
+        """
+        Give back the place a child took with ``admit``. Releasing a child that holds no
+        place is a no-op.
+
+        :param batch_id: The child's batch.
+        :type batch_id: str
+        :param task_id: The child that finished or gave up its place.
+        :type task_id: str
+        """
         held = self._held.get(batch_id)
         if held is None:
             return
@@ -111,9 +108,24 @@ class BatchWindow:
             del self._held[batch_id]
 
     def held(self, batch_id: str) -> set[str]:
+        """
+        The children of a batch holding a place right now.
+
+        :param batch_id: The batch to look at.
+        :type batch_id: str
+        :return: A copy, so the caller may keep it across later admits and releases.
+        :rtype: set[str]
+        """
         return set(self._held.get(batch_id, ()))
 
     def free(self, batch_id: str) -> int:
+        """
+        How many more children of a batch could be admitted now.
+
+        :param batch_id: The batch to look at.
+        :type batch_id: str
+        :rtype: int
+        """
         return self._size - len(self._held.get(batch_id, ()))
 
 
