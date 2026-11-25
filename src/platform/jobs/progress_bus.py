@@ -5,18 +5,13 @@ from dataclasses import asdict, dataclass
 import json
 from typing import Any
 
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
-
+from src.constants.redis import BATCH_NAMESPACE, LATEST_FRAME, PROGRESS_CHANNEL, TASK_NAMESPACE
 from src.logger import get_logger
 from src.platform.jobs.progress import ProgressFrame
 from src.platform.jobs.state_machine import TaskStateMachine
+from src.platform.redis.redis_service import REDIS_UNAVAILABLE, RedisService
 
 logger = get_logger("progress_bus")
-
-#: Seconds the latest frame outlives its task's last report. Long enough for a client
-#: that reconnects mid-task; short enough that nothing has to clean it up.
-LATEST_FRAME_TTL = 60
 
 #: Looks up a task's stored state, for observers that have no live frame to start from.
 SnapshotFn = Callable[[str], Awaitable[ProgressFrame | None]]
@@ -27,16 +22,22 @@ SummarizeFn = Callable[[str], Awaitable[Any]]
 _END_OF_STREAM = object()
 
 
-def _progress_channel(prefix: str, task_id: str) -> str:
-    return f"{prefix}:task:{task_id}:progress"
+def _progress_channel(redis: RedisService, task_id: str) -> str:
+    return redis.key(TASK_NAMESPACE, task_id, PROGRESS_CHANNEL)
 
 
-def _batch_channel(prefix: str, batch_id: str) -> str:
-    return f"{prefix}:batch:{batch_id}:progress"
+def _batch_channel(redis: RedisService, batch_id: str) -> str:
+    return redis.key(BATCH_NAMESPACE, batch_id, PROGRESS_CHANNEL)
 
 
-def _latest_key(prefix: str, task_id: str) -> str:
-    return f"{prefix}:task:{task_id}:latest"
+def _batch_id_of(redis: RedisService, channel: str) -> str:
+    """The batch id inside a channel name built by ``_batch_channel``."""
+    head = redis.key(BATCH_NAMESPACE, "")
+    return channel[len(head):-len(f":{PROGRESS_CHANNEL}")]
+
+
+def _latest_key(redis: RedisService, task_id: str) -> str:
+    return redis.key(TASK_NAMESPACE, task_id, LATEST_FRAME)
 
 
 def _encode(frame: ProgressFrame) -> str:
@@ -74,15 +75,17 @@ class ProgressPublisher:
     rather than with the database's throttled copy.
     """
 
-    def __init__(self, redis: Redis, prefix: str):
+    def __init__(self, redis: RedisService, latest_frame_ttl: int):
         """
-        :param redis: Client for the Redis the web process subscribes to.
-        :type redis: Redis
-        :param prefix: Key prefix shared with the web process, e.g. ``"video-app"``.
-        :type prefix: str
+        :param redis: The Redis the web process subscribes to.
+        :type redis: RedisService
+        :param latest_frame_ttl: Seconds the latest frame outlives its task's last report.
+            Long enough for a client that reconnects mid-task; short enough that nothing
+            has to clean it up.
+        :type latest_frame_ttl: int
         """
         self._redis = redis
-        self._prefix = prefix
+        self._latest_frame_ttl = latest_frame_ttl
 
     async def publish(self, frame: ProgressFrame, batch_id: str | None = None) -> None:
         """
@@ -100,13 +103,13 @@ class ProgressPublisher:
         """
         payload = _encode(frame)
         try:
-            async with self._redis.pipeline(transaction=False) as pipe:
-                pipe.publish(_progress_channel(self._prefix, frame.task_id), payload)
+            async with self._redis.client.pipeline(transaction=False) as pipe:
+                pipe.publish(_progress_channel(self._redis, frame.task_id), payload)
                 if batch_id is not None:
-                    pipe.publish(_batch_channel(self._prefix, batch_id), payload)
-                pipe.set(_latest_key(self._prefix, frame.task_id), payload, ex=LATEST_FRAME_TTL)
+                    pipe.publish(_batch_channel(self._redis, batch_id), payload)
+                pipe.set(_latest_key(self._redis, frame.task_id), payload, ex=self._latest_frame_ttl)
                 await pipe.execute()
-        except (RedisError, OSError) as e:
+        except REDIS_UNAVAILABLE as e:
             logger.warning(f"Could not publish progress for task {frame.task_id}: {e}")
 
     async def relay(
@@ -142,16 +145,13 @@ class ProgressBus:
 
     def __init__(
         self,
-        redis: Redis,
-        prefix: str,
+        redis: RedisService,
         watchdog_interval: float = 10.0,
         channel_size: int = 64,
     ):
         """
-        :param redis: Client for the Redis the workers publish to.
-        :type redis: Redis
-        :param prefix: Key prefix shared with the workers.
-        :type prefix: str
+        :param redis: The Redis the workers publish to.
+        :type redis: RedisService
         :param watchdog_interval: Seconds without a frame after which an observer checks
             the database. A worker that crashes, or a task cancelled before it ever ran,
             sends no final frame; without this the observer would wait forever.
@@ -160,7 +160,6 @@ class ProgressBus:
         :type channel_size: int
         """
         self._redis = redis
-        self._prefix = prefix
         self._watchdog_interval = watchdog_interval
         self._channel_size = channel_size
 
@@ -176,10 +175,10 @@ class ProgressBus:
 
         :rtype: None
         """
-        self._pubsub = self._redis.pubsub(ignore_subscribe_messages=True)
+        self._pubsub = self._redis.client.pubsub(ignore_subscribe_messages=True)
         await self._pubsub.psubscribe(
-            _progress_channel(self._prefix, "*"), 
-            _batch_channel(self._prefix, "*")
+            _progress_channel(self._redis, "*"),
+            _batch_channel(self._redis, "*"),
         )
         self._reader = asyncio.create_task(self._read_loop(), name="progress-bus-reader")
 
@@ -329,8 +328,8 @@ class ProgressBus:
 
     async def _read_latest(self, task_id: str) -> ProgressFrame | None:
         try:
-            raw = await self._redis.get(_latest_key(self._prefix, task_id))
-        except (RedisError, OSError) as e:
+            raw = await self._redis.client.get(_latest_key(self._redis, task_id))
+        except REDIS_UNAVAILABLE as e:
             logger.warning(f"Could not read latest progress for task {task_id}: {e}")
             return None
         return _decode(raw) if raw is not None else None
@@ -350,7 +349,7 @@ class ProgressBus:
                 message = await self._pubsub.get_message(timeout=1.0)
             except asyncio.CancelledError:
                 raise
-            except (RedisError, OSError) as e:
+            except REDIS_UNAVAILABLE as e:
                 logger.warning(f"Progress subscription interrupted, retrying: {e}")
                 await asyncio.sleep(1.0)
                 continue
@@ -363,8 +362,8 @@ class ProgressBus:
                 continue
             # A batch task's frame arrives on both channels; each copy goes only to the
             # observers of the channel it came in on, so nobody sees it twice.
-            if message.get("pattern") == _batch_channel(self._prefix, "*"):
-                batch_id = message["channel"][len(f"{self._prefix}:batch:"):-len(":progress")]
+            if message.get("pattern") == _batch_channel(self._redis, "*"):
+                batch_id = _batch_id_of(self._redis, message["channel"])
                 self._broadcast(self._batch_channels, batch_id, frame)
             else:
                 self._broadcast(self._channels, frame.task_id, frame)

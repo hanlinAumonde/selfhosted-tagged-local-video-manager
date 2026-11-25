@@ -2,11 +2,13 @@ import io
 import time
 from typing import Callable
 
-from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from src.config import Settings
-from src.features.catalog.video import VideoModel
+from src.constants.http import THUMBNAIL_CACHE_CONTROL
+from src.constants.storage import THUMBNAIL_KEY_PREFIX
+from src.errors import InputValidationError, VideoFileNotFoundError, VideoNotFoundError
+from src.features.catalog.video_model import VideoModel
 from src.logger import get_logger
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.absolute_path import AbsolutePath
@@ -14,6 +16,7 @@ from src.platform.storage.base_resource_handler import BaseResourceHandler
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
 logger = get_logger("thumbnail_service")
+
 
 
 class StorageBreaker:
@@ -31,13 +34,17 @@ class StorageBreaker:
     ThumbnailService for the whole process rather than one per request.
     """
 
-    def __init__(self, cooldown: float = 30.0, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, cooldown: float, clock: Callable[[], float] = time.monotonic):
         self._cooldown = cooldown
         self._clock = clock
         self._opened_at: float | None = None
         self._probing = False
 
     def allows(self) -> bool:
+        """
+        Whether this call may use the storage. After the cooldown exactly one caller gets
+        True, as the probe; it must report back with ``succeeded`` or ``failed``.
+        """
         if self._opened_at is None:
             return True
         if self._probing or self._clock() - self._opened_at < self._cooldown:
@@ -46,10 +53,12 @@ class StorageBreaker:
         return True
 
     def succeeded(self) -> None:
+        """Record that the storage answered, so every later call may use it again."""
         self._opened_at = None
         self._probing = False
 
     def failed(self) -> None:
+        """Record that the storage failed, starting a new cooldown from now."""
         self._opened_at = self._clock()
         self._probing = False
 
@@ -65,7 +74,9 @@ class ThumbnailService:
         self.resourceHandlerService = resource_handler_service
         self.ffmpeg = ffmpeg_service
         self.settings = settings
-        self._storage_breaker = storage_breaker or StorageBreaker()
+        self._storage_breaker = storage_breaker or StorageBreaker(
+            settings.thumbnail_config.storage_retry_cooldown
+        )
         self._storage_handler = self._init_storage_handler()
 
     def _init_storage_handler(self) -> BaseResourceHandler | None:
@@ -99,13 +110,13 @@ class ThumbnailService:
         :rtype: StreamingResponse
         """            
         if not video_id:
-            raise HTTPException(status_code=400, detail="Cannot find thumbnail without video-id")
+            raise InputValidationError(field="video_id", issue="must not be empty")
 
         # 1- fetch video metadata from database
         video = await VideoModel.get(video_id)
         if not video:
             logger.warning(f"Video metadata not found for video_id: {video_id}")
-            raise HTTPException(status_code=404, detail="Video not found")
+            raise VideoNotFoundError(video_id)
 
         video_handler = self.resourceHandlerService.get_handler(video.category)
         video_path = AbsolutePath.from_existing_path(
@@ -116,7 +127,7 @@ class ThumbnailService:
         video_fs_path = video_path.FS_format_path()
         if await video_handler.stat(video_fs_path) is None:
             logger.warning(f"Video file not found at path: {video_fs_path}")
-            raise HTTPException(status_code=404, detail="Video file doesn't exist")
+            raise VideoFileNotFoundError(video.path)
 
         # 2- try to read stored thumbnail (only if storage is configured)
         storage_path = (
@@ -222,7 +233,7 @@ class ThumbnailService:
         """
         cfg = self.settings.thumbnail_config
         return self._storage_handler.join_path(
-            "thumbnails", cfg.storage_pseudo_name, f"{video_id}.jpg"
+            THUMBNAIL_KEY_PREFIX, cfg.storage_pseudo_name, f"{video_id}.jpg"
         )
 
     @staticmethod
@@ -240,6 +251,6 @@ class ThumbnailService:
         return StreamingResponse(
             content=io.BytesIO(thumbnail_bytes),
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=3600"},
+            headers={"Cache-Control": THUMBNAIL_CACHE_CONTROL},
             background=background,
         )

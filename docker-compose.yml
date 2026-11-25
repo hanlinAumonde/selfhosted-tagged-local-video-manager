@@ -86,7 +86,7 @@ services:
     command:
       - taskiq
       - worker
-      - src.worker:create_broker
+      - src.workers.worker_migration:create_broker
       - --workers
       - "1"
       - --ack-type

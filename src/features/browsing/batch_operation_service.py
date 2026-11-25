@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from bson import ObjectId
 from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
 from src.features.catalog.series_service import SeriesChange, SeriesService

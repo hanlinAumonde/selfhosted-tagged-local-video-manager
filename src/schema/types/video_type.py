@@ -2,8 +2,8 @@ from typing import Optional
 import strawberry
 
 from src.features.catalog.series_service import SeriesPlacement
-from src.features.catalog.video import VideoModel
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from src.schema.types.pydantic_types.batch_operation_type import SeriesOrderEntryInputModel
 from src.schema.types.pydantic_types.video_type import (
     SeriesFieldInputModel,
@@ -109,7 +109,22 @@ class Video:
     @classmethod
     def create_new(cls, id: strawberry.ID, name: str, isDir: bool, lastModifyTime: float, size: float, duration: float = 0.0) -> "Video":
         """
-        Create a new Video instance with default values.
+        Create a Video that has no record of its own, such as a directory row, with every
+        metadata field at its default.
+
+        :param id: The id to publish; a directory has none in the database.
+        :type id: strawberry.ID
+        :param name: The name shown for the row.
+        :type name: str
+        :param isDir: Whether the row is a directory.
+        :type isDir: bool
+        :param lastModifyTime: Modification time, in seconds since the epoch.
+        :type lastModifyTime: float
+        :param size: Size in bytes.
+        :type size: float
+        :param duration: Duration in seconds.
+        :type duration: float
+        :rtype: Video
         """
         return cls(
             id=id,

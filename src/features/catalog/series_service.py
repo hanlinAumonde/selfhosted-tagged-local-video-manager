@@ -5,8 +5,8 @@ from beanie import PydanticObjectId
 from bson import ObjectId
 from bson.errors import InvalidId
 
-from src.features.catalog.series import SeriesModel
-from src.features.catalog.video import VideoModel
+from src.features.catalog.series_model import SeriesModel
+from src.features.catalog.video_model import VideoModel
 from src.logger import get_logger
 
 logger = get_logger("series_service")

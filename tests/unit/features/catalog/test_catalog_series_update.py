@@ -19,7 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.errors import InputValidationError
-from src.features.catalog.series import SeriesModel
+from src.features.catalog.series_model import SeriesModel
 from src.schema.types.pydantic_types.video_type import (
     SeriesFieldInputModel,
     UpdateVideoMetadataInputModel,

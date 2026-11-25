@@ -15,19 +15,16 @@ from src.platform.jobs.state_machine import TaskStateMachine
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.migration.device_slots import DeviceSlots
 from src.platform.storage.resource_handler_service import ResourceHandlerService
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.features.catalog.series_service import SeriesService
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.errors import _MigrationCancelled, InputValidationError
 from src.logger import get_logger
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 
 logger = get_logger("migration_service")
-
-#: Key this service is registered under in the ``PathLockRegistry``. Shared so the string
-#: is written down exactly once.
-MIGRATION_EXECUTOR_KEY = "migration"
 
 _ACTIVE_STATUSES = [s.value for s in TaskStatus if s not in TaskStateMachine.TERMINAL_STATUSES]
 

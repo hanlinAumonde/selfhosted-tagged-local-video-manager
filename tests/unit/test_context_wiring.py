@@ -42,12 +42,12 @@ def resolved_registry(
 
 
 @pytest.fixture
-def dir_metadata_service_for_context(fs_settings, local_resource_handler_service, local_cache_service):
+def dir_metadata_service_for_context(fs_settings, local_resource_handler_service, redis_cache):
     from src.features.browsing.dir_metadata_service import DirMetadataService
     return DirMetadataService(
         settings=fs_settings,
         resource_handler_service=local_resource_handler_service,
-        cache_service=local_cache_service,
+        cache=redis_cache,
     )
 
 
@@ -99,7 +99,7 @@ def test_the_thumbnail_service_is_the_same_instance_on_every_request(
 
 
 def test_the_services_that_read_locks_receive_that_registry(
-    fs_settings, local_resource_handler_service, local_cache_service,
+    fs_settings, local_resource_handler_service, redis_cache,
     dir_metadata_service_for_context, resolved_registry,
 ):
     """Both readers must share the root's registry rather than a private empty one."""

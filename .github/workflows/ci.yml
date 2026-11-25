@@ -15,10 +15,36 @@ permissions:
   contents: read
 
 jobs:
+  # A workflow that never starts leaves required status checks pending, 
+  # while a skipped job counts as passed.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # On pull_request the filter lists the changed files through the API.
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # On push, compare with the commit before the push instead of the default branch.
+          base: ${{ github.ref_name }}
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+
   backend-tests:
+    needs: changes
     # A PR from develop or main brings commits that branch's own pushes already test, so
     # its PR run would be the same work twice. e2e needs this job, so it is skipped too.
-    if: github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main')
+    if: >-
+      needs.changes.outputs.code == 'true' &&
+      (github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,13 +53,14 @@ jobs:
           python-version: "3.12"
       # Same versions as the image: both install from uv.lock.
       - run: uv sync --locked
-      # Integration tests start Mongo and Redis through testcontainers, which uses the
-      # runner's own Docker.
       - run: uv run -m pytest
 
   frontend-tests:
-    # Same reason as backend-tests.
-    if: github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main')
+    needs: changes
+    # Same reasons as backend-tests.
+    if: >-
+      needs.changes.outputs.code == 'true' &&
+      (github.event_name == 'push' || (github.head_ref != 'develop' && github.head_ref != 'main'))
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -70,8 +97,30 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      # Builds the images once; everything after this uses exactly these.
-      - run: npm run stack:up
+      # The images are built once, here; everything after this uses exactly these.
+      # Built outside compose so their layers can be cached between runs: a fresh runner
+      # has no Docker cache of its own. Context and Dockerfile mirror docker-compose.yml.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: ${{ env.BACKEND_IMAGE }}
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: front-end/video-app-front
+          file: front-end/video-app-front/Dockerfile
+          tags: ${{ env.FRONTEND_IMAGE }}
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - run: npm run stack:start
 
       - run: npm test
 

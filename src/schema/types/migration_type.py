@@ -5,7 +5,7 @@ import strawberry
 
 from src.features.migration import migration_service
 from src.features.migration.migration_batch import BatchSummary
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.platform.jobs.progress import ProgressFrame
 from src.schema.types.fileBrowse_type import RelativePathInput
 from src.schema.types.scalars import BigInt
@@ -48,6 +48,13 @@ class MigrationPreflightResult:
     def from_service(
         cls, result: migration_service.MigrationPreflightResult
     ) -> "MigrationPreflightResult":
+        """
+        Publish a single-file preflight result.
+
+        :param result: The service's preflight result.
+        :type result: migration_service.MigrationPreflightResult
+        :rtype: MigrationPreflightResult
+        """
         return cls(
             valid=result.valid,
             source_file_size=result.source_file_size,
@@ -82,6 +89,13 @@ class MigrationTask:
 
     @classmethod
     def from_model(cls, model: MigrationTaskModel) -> "MigrationTask":
+        """
+        Publish a stored migration task.
+
+        :param model: The task document.
+        :type model: MigrationTaskModel
+        :rtype: MigrationTask
+        """
         return cls(
             id=strawberry.ID(str(model.id)),
             source_path=model.source_path,
@@ -192,6 +206,13 @@ class MigrationBatchSummary:
 
     @classmethod
     def from_service(cls, summary: BatchSummary) -> "MigrationBatchSummary":
+        """
+        Publish a batch summary.
+
+        :param summary: The service's count of the batch's children by state.
+        :type summary: BatchSummary
+        :rtype: MigrationBatchSummary
+        """
         return cls(
             batch_id=strawberry.ID(summary.batch_id),
             total=summary.total,

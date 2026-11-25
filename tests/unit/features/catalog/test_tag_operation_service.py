@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pymongo.errors import BulkWriteError
 
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from src.features.catalog.tag_operation_service import TagOperationService
 
 pytestmark = pytest.mark.unit

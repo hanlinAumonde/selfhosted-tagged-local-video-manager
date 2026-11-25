@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.features.migration.migration_task import TaskStatus
+from src.platform.jobs.task_model import TaskStatus
 from tests.graphql.helpers import GET_MIGRATION_TASKS, assert_no_errors
 from tests.unit.features.migration.batch_helpers import add_child, make_batch
 

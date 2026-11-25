@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.features.browsing.browse_file_service import DirectoryEntry, VideoEntry
 from src.errors import FileBrowseError
 from src.platform.storage.absolute_path import AbsolutePath

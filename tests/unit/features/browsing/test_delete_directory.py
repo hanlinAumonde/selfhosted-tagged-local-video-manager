@@ -32,8 +32,8 @@ from src.config import Settings
 from src.errors import InputValidationError
 from src.features.browsing.batch_operation_service import DirectoryDeletionStrategy
 from src.features.browsing.browse_file_service import DirectoryEntry
-from src.features.browsing.dir_metadata import DirMetadataModel
-from src.features.catalog.video import VideoModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
+from src.features.catalog.video_model import VideoModel
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 

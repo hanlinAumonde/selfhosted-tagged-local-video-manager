@@ -54,6 +54,14 @@ async def resolve_source_path(video_id: str, info: strawberry.Info) -> AbsoluteP
     return AbsolutePath.from_existing_path(video.path, category=video.category, handler=handler)
 
 def target_dir_of(validated, info: strawberry.Info) -> AbsolutePath:
+    """
+    Resolve the target directory a validated migration input names.
+
+    :param validated: Any validated migration input with a ``target_dir_relative_path``.
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
+    :rtype: AbsolutePath
+    """
     return AbsolutePath.from_relative_path(
         parsedPath=validated.target_dir_relative_path.parsedPath,
         handlerService=get_context_value(info, ContextEnum.RESOURCE_HANDLER_SERVICE),
@@ -61,18 +69,46 @@ def target_dir_of(validated, info: strawberry.Info) -> AbsolutePath:
     )
 
 async def summary_of(batches: MigrationBatchService, batch_id: str) -> MigrationBatchSummary:
+    """
+    The published summary of a batch.
+
+    :param batches: The batch service to summarise with.
+    :type batches: MigrationBatchService
+    :param batch_id: The batch to summarise.
+    :type batch_id: str
+    :raises InputValidationError: If no such batch exists.
+    :rtype: MigrationBatchSummary
+    """
     summary = await batches.summarize(batch_id)
     if summary is None:
         raise InputValidationError(field="batch_id", issue="batch does not exist")
     return MigrationBatchSummary.from_service(summary)
 
 async def series_positions(info: strawberry.Info, video_models: list) -> dict[str, SeriesPlacement]:
+    """
+    The series placement of each given video, in one lookup.
+
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
+    :param video_models: The videos to place.
+    :type video_models: list[VideoModel]
+    :return: Placement by video id; a video in no series has no entry.
+    :rtype: dict[str, SeriesPlacement]
+    """
     seriesService: SeriesService = get_context_value(info, ContextEnum.SERIES_SERVICE)
     return await seriesService.positions_of(video_models)
 
 
 async def to_browse_nodes(entries: list[BrowseEntry], info: strawberry.Info) -> list[FileBrowseNode]:
-    """Present a listing, resolving the series position of every video row in one lookup."""
+    """
+    Present a listing, resolving the series position of every video row in one lookup.
+
+    :param entries: The listing, in the order it is shown.
+    :type entries: list[BrowseEntry]
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
+    :rtype: list[FileBrowseNode]
+    """
     positions = await series_positions(
         info, [e.document for e in entries if isinstance(e, VideoEntry)]
     )
@@ -121,6 +157,15 @@ async def to_browse_node(
     )
 
 async def to_video(video_model, info: strawberry.Info) -> Video:
+    """
+    Present one video document, with its series placement.
+
+    :param video_model: The video to present.
+    :type video_model: VideoModel
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
+    :rtype: Video
+    """
     seriesService: SeriesService = get_context_value(info, ContextEnum.SERIES_SERVICE)
     positions = await seriesService.positions_of([video_model])
     return await Video.from_mongoDB(video_model, series=positions.get(str(video_model.id)))

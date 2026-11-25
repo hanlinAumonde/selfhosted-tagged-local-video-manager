@@ -3,6 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
+from src.config import Settings
+
 from src.schema.types.pydantic_types.migration_type import (
     CreateMigrationBatchInputModel,
     MigrationBatchPreflightInputModel,
@@ -67,3 +69,23 @@ class TestBatchConflictStrategy:
             CreateMigrationBatchInputModel(
                 source_video_ids=_ids(2), target_dir_relative_path=TARGET, conflict_strategy="merge"
             )
+
+
+class TestConfiguredBatchSize:
+    def test_the_batch_size_limit_comes_from_the_configuration(self, test_settings, monkeypatch):
+        """
+        Scenario: the most sources one batch may hold is a setting
+          Given validation.migration_batch_max_size is 3
+          When a batch migration input with 4 distinct sourceVideoIds is validated
+          Then a validation error is raised
+          And with exactly 3 distinct ids it is accepted
+        """
+        payload = test_settings.model_dump()
+        payload["validation"]["migration_batch_max_size"] = 3
+        monkeypatch.setattr("src.config._settings", Settings.model_validate(payload))
+
+        with pytest.raises(ValidationError):
+            CreateMigrationBatchInputModel(source_video_ids=_ids(4), target_dir_relative_path=TARGET)
+
+        accepted = CreateMigrationBatchInputModel(source_video_ids=_ids(3), target_dir_relative_path=TARGET)
+        assert len(accepted.source_video_ids) == 3

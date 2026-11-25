@@ -1,17 +1,24 @@
 from beanie import init_beanie
 from pymongo import AsyncMongoClient
-from src.features.catalog.video import VideoModel
-from src.features.catalog.series import SeriesModel
-from src.features.catalog.video_tag import VideoTagModel
-from src.features.browsing.dir_metadata import DirMetadataModel
-from src.features.migration.migration_batch import MigrationBatchModel
-from src.features.migration.migration_task import MigrationTaskModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.series_model import SeriesModel
+from src.features.catalog.video_tag_model import VideoTagModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
+from src.features.migration.migration_batch_model import MigrationBatchModel
+from src.features.migration.migration_task_model import MigrationTaskModel
 from src.config import MongoConfig
 from src.logger import get_logger
 
 logger = get_logger("setup_mongo")
 
 async def setup_mongo(mongo_config: MongoConfig):
+    """
+    Connect to MongoDB and register every document model with Beanie.
+
+    :param mongo_config: The ``mongo`` section of the settings. Credentials, when set,
+        authenticate against the application database itself.
+    :type mongo_config: MongoConfig
+    """
     #create an async MongoDB client
     mongo_uri = "mongodb://"
     mongo_host_port = f"{mongo_config.host}:{mongo_config.port}"

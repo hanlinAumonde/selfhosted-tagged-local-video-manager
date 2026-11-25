@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 from beanie.operators import Set
 
-from src.features.catalog.video import VideoModel
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.catalog.video_model import VideoModel
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.base_resource_handler import BaseResourceHandler
 
 pytestmark = pytest.mark.unit

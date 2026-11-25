@@ -1,7 +1,7 @@
 from typing import Annotated, Optional
 import strawberry
 
-from src.schema.types.pydantic_types.fileBrowe_type import (
+from src.schema.types.pydantic_types.fileBrowse_type import (
     CreateDirectoryInputModel,
     RelativePathInputModel,
     SearchInDirectoryInputModel

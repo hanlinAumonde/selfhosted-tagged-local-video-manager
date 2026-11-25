@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pymongo import UpdateOne
 
 from src.config import Settings
-from src.features.browsing.dir_metadata import DirMetadataModel
+from src.features.browsing.dir_metadata_model import DirMetadataModel
 from src.logger import get_logger
-from src.platform.cache.cache_service import CacheService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.storage.absolute_path import AbsolutePath
 from src.platform.storage.resource_handler_service import ResourceHandlerService
 
@@ -31,11 +31,11 @@ class DirMetadataService:
         self,
         settings: Settings,
         resource_handler_service: ResourceHandlerService,
-        cache_service: CacheService,
+        cache: RedisCache,
     ):
         self.settings = settings
         self.resourceHandlerService = resource_handler_service
-        self._cache = cache_service
+        self._cache = cache
         self._ttl = settings.cache_config.ttl.dir_metadata
 
     def _cache_key(self, category: str, path: str) -> str:

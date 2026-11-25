@@ -8,8 +8,9 @@ from src.features.browsing.browse_file_service import BrowseFileService
 from src.features.browsing.dir_metadata_service import DirMetadataService
 from src.features.catalog.series_service import SeriesService
 from src.features.catalog.tag_operation_service import TagOperationService
-from src.features.migration.migration_service import MIGRATION_EXECUTOR_KEY, MigrationService
-from src.platform.cache.cache_service import CacheService
+from src.constants.tasks import MIGRATION_EXECUTOR_KEY
+from src.features.migration.migration_service import MigrationService
+from src.platform.redis.redis_cache import RedisCache
 from src.platform.jobs.path_locks import PathLockRegistry
 from src.platform.media.ffmpeg_service import FFmpegService
 from src.platform.storage.resource_handler_service import ResourceHandlerService
@@ -19,12 +20,12 @@ from src.platform.storage.resource_handler_service import ResourceHandlerService
 def dir_meta_svc(
     fs_settings: Settings,
     local_resource_handler_service: ResourceHandlerService,
-    local_cache_service: CacheService,
+    redis_cache: RedisCache,
 ) -> DirMetadataService:
     return DirMetadataService(
         settings=fs_settings,
         resource_handler_service=local_resource_handler_service,
-        cache_service=local_cache_service,
+        cache=redis_cache,
     )
 
 

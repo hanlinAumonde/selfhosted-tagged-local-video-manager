@@ -30,10 +30,10 @@ resolvers/ + schema/   GraphQL 交付层 —— 校验、委托、映射
         ↓
 features/              catalog · browsing · playback · migration
         ↓
-platform/              storage · media · cache · jobs（可复用内核，不认识任何 feature）
+platform/              storage · media · redis · jobs（可复用内核，不认识任何 feature）
 ```
 
-**这个方向是被钉死的，不只是写在文档里。** `tests/unit/test_architecture.py` 扫描每个模块的 import，只要 feature 引入了 strawberry 或 GraphQL 类型、resolver 引入了文档模型、或 `platform/` 引入了 feature，构建就会失败。反向依赖在 code review 和绿色测试里都是隐形的——它只会在很久之后，以「这个服务没法复用」和「测个目录遍历还得建 GraphQL schema」的形式暴露。
+**这个方向是被钉死的，不只是写在文档里。** `tests/unit/test_architecture.py` 扫描每个模块的 import，只要 feature 引入了 strawberry 或 GraphQL 类型、resolver 引入了文档模型、或 `platform/` 引入了 feature，构建就会失败。另有两条把 Redis 收在一处：只有 `platform/redis/` 能 import `redis`，只有 `src/workers/` 能 import `taskiq_redis`。反向依赖在 code review 和绿色测试里都是隐形的——它只会在很久之后，以「这个服务没法复用」和「测个目录遍历还得建 GraphQL schema」的形式暴露。
 
 <!-- TODO: 架构图 -->
 
@@ -50,7 +50,6 @@ platform/              storage · media · cache · jobs（可复用内核，不
 | PyMongo | 4.18 | 异步 MongoDB 驱动 |
 | Pydantic | 2.13.5 | 输入契约与配置 |
 | boto3 | 1.43+ | S3 兼容存储 |
-| cachetools | 7.2+ | 内存 TTL 缓存 |
 | loguru | 0.7+ | 结构化日志 |
 | envyaml | 1.10+ | `config.yaml` 的 `$VAR\|default` 语法支持 |
 | pytest | 9.1+ | 测试（单元 + GraphQL + 集成） |
@@ -62,22 +61,25 @@ platform/              storage · media · cache · jobs（可复用内核，不
 | Angular | 22.1 | UI 框架（Standalone、Signals、zoneless） |
 | Signal Forms | 22.1 | 全部表单的唯一实现，无 `ReactiveFormsModule` |
 | TypeScript | 6.0 | 开发语言 |
-| Apollo Angular | 13.0 | GraphQL 客户端 |
+| Apollo Angular | 14.2 | GraphQL 客户端（`@apollo/client` 4.3） |
 | graphql-ws | 6.0 | WebSocket 订阅 |
 | Angular Material | 22.1 | UI 组件库 |
 | Tailwind CSS | 4.1 | 样式框架 |
-| Video.js | 8.23 | 视频播放器 |
+| Video.js | 10（`@videojs/html`） | 视频播放器（custom elements） |
 | graphql-codegen | 6.1 | TypeScript 类型 + Apollo Service 自动生成 |
-| Vitest | 4.0 | 单元测试 |
+| Vitest | 4.0 | 单元与组件测试（`@vitest/coverage-v8`） |
+| Playwright | 1.65 | 整栈端到端测试 |
 
 ### 部署技术
 
 | 技术 | 版本 | 说明 |
 | ---- | ---- | ---- |
-| Docker Compose | - | 容器编排（前端 / 后端 / MongoDB / RustFS） |
+| Docker Compose | - | 容器编排（前端 / 后端 / 迁移 worker / MongoDB / Redis / RustFS） |
 | Nginx | alpine | 前端服务器 + 反向代理 |
 | ffmpeg / ffprobe | - | 缩略图、时长探测、实时转码 |
 | RustFS / MinIO | - | S3 兼容对象存储（可选） |
+| Redis | 8 | 缓存、任务队列（Redis Streams）、进度 Pub/Sub |
+| GitHub Actions | - | CI：测试 → e2e → 推送测过的镜像到 Docker Hub |
 
 ## 功能特性
 
@@ -134,10 +136,11 @@ platform/              storage · media · cache · jobs（可复用内核，不
 | uv | 最新 | 是 | Python 包管理器 |
 | Node.js | 24+ | 是 | 前端构建 |
 | MongoDB | 6.0+ | 是 | 数据库 |
+| Redis | 7+ | 是 | 缓存、任务队列、任务进度 |
 | ffmpeg / ffprobe | - | 是 | 缩略图、时长、转码 |
 | Docker | - | 推荐 | 一键部署（见下文） |
 
-> 不想本地装 MongoDB 的话，可以只启动 `docker-compose.yml` 里的那一个服务。
+> 不想本地装 MongoDB 和 Redis 的话，可以只启动这两个服务：`docker-compose up -d mongodb redis`。
 
 ### 1. 克隆项目
 
@@ -190,12 +193,12 @@ uv sync
 uv run main.py
 ```
 
-后端服务启动于 `http://localhost:12000`。即使缓存用的是 `cachetools`，任务队列也需要 Redis（`REDIS_URL`）。
+后端服务启动于 `http://localhost:12000`。需要 Redis（`REDIS_URL`）：缓存、任务队列和任务进度都在里面。
 
 **迁移 worker**（另开一个终端；不启动它，迁移会一直排队）：
 
 ```bash
-uv run taskiq worker src.worker:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
+uv run taskiq worker src.workers.worker_migration:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
 ```
 
 只能跑一个 worker 进程（`--workers 1`）：它启动时会把所有未完成的迁移当作自己留下的孤儿来恢复。
@@ -223,6 +226,29 @@ npm start
 ```
 
 前端服务启动于 `http://localhost:4200`。
+
+## 测试与 CI
+
+| 层 | 工具 | 位置 | 运行 |
+| -- | ---- | ---- | ---- |
+| 后端单元 / GraphQL / 集成 | pytest（MongoDB 与 Redis 由 testcontainers 启动） | `tests/` | `uv run -m pytest` |
+| 前端单元与组件 | Vitest（`@angular/build:unit-test`，jsdom） | 与被测文件同目录的 `*.spec.ts` | `npm test` / `npm run test:ci`（含覆盖率） |
+| 端到端 | Playwright，跑在完整的 Docker Compose 栈上 | `e2e/` | 见下 |
+
+集成测试按 feature 分目录、一个文件一条用户旅程（`tests/integration/browsing/`、`catalog/`、`migration/`、`journeys/`）。前端测试用 `ApolloTestingController` 配合 codegen 生成的 Document 断言 GraphQL 请求，测试客户端套用与应用相同的默认选项。
+
+**端到端测试。** 旅程跑在真实的整栈上——前端、后端、迁移 worker、MongoDB、Redis、RustFS——由根目录 `docker-compose.yml` 加一个覆盖文件启动。一次性的 seed 服务用 ffmpeg 生成测试视频并创建 bucket；每条旅程只碰属于自己的预置目录，因此共用一个栈互不干扰。
+
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+npm run stack:up      # 构建镜像并起栈（端口 8080）
+npm test
+npm run stack:down    # 连同 volume 一起删除，下次从干净状态开始
+```
+
+**CI**（`.github/workflows/ci.yml`）在 push 和 PR 到 `main`、`develop` 时运行：前后端单测并行，然后 e2e job 只构建一次两个镜像（带层缓存）、用它们跑旅程，**仅在 push 到 `main` 时**把**这批测过的镜像**以 `latest` 和 `sha-<短 sha>` 推到 Docker Hub。各处都从已提交的锁文件（`uv.lock`、`package-lock.json`）安装依赖，单测、e2e 与发布的镜像用的是同一组版本。
 
 ## Docker 快速部署
 
@@ -297,21 +323,25 @@ video-app/
 ├── .env.example                     # 全部环境变量及说明，复制为 .env 使用
 ├── Dockerfile                       # 后端镜像构建
 ├── docker-compose.yml               # 前端 + 后端 + 迁移 worker + MongoDB + Redis + RustFS
-├── pyproject.toml                   # 项目依赖与元数据
+├── pyproject.toml · uv.lock         # 项目依赖与所有安装都使用的锁文件
+├── .github/workflows/ci.yml         # CI：前后端测试 → e2e → 推送镜像
 │
 ├── src/
 │   ├── app.py                       # 应用工厂：日志、Mongo、任务队列 + 进度总线、CORS、路由
-│   ├── worker.py                    # 迁移 worker 的组装根（taskiq 入口：create_broker）
+│   ├── workers/                     # ── 任务队列进程（只有这里 import taskiq）──
+│   │   ├── dispatch.py              # 每条队列一个 Redis Stream broker；投递、对账、恢复
+│   │   └── worker_migration.py      # 迁移 worker 的组装根（taskiq 入口：create_broker）
 │   ├── config.py                    # Settings（Pydantic + envyaml）、handler 配置 union
-│   ├── context.py                   # 依赖注入容器：13 个服务 + 路径锁注册表
-│   ├── errors.py                    # 自定义异常
+│   ├── constants/                   # 不必进配置的命名常量，按用途分文件（http · media · storage · tasks · redis · schema · log）
+│   ├── context.py                   # 依赖注入容器：15 个服务 + 进程唯一的 RedisService / RedisCache + 路径锁注册表
+│   ├── errors.py                    # 自定义异常；REST 路由直接抛出，由 app.py 统一映射成状态码
 │   ├── logger.py                    # loguru 日志配置
 │   │
 │   ├── db/
-│   │   └── setup_mongo.py           # Mongo 连接 + Beanie 初始化（注册 5 个文档）
+│   │   └── setup_mongo.py           # Mongo 连接 + Beanie 初始化（注册 6 个文档）
 │   │
 │   ├── platform/                    # ── 可复用内核，不认识任何 feature ──
-│   │   ├── cache/                   # base_cache · cachetools_cache · cache_service
+│   │   ├── redis/                   # redis_service（唯一的连接 + key 命名）· redis_cache
 │   │   ├── media/
 │   │   │   └── ffmpeg_service.py    # 缩略图、时长、转码（信号量限并发）
 │   │   ├── storage/                 # 存储后端的策略模式
@@ -325,25 +355,26 @@ video-app/
 │   │       ├── task_model.py        # TaskStatus + BaseTaskModel（进度走访问器）
 │   │       ├── progress.py          # ProgressFrame —— 单位无关的 current/total
 │   │       ├── state_machine.py     # TaskStateMachine[TTask] —— 三阶段、崩溃恢复
-│   │       ├── dispatch.py          # 每条队列一个 Redis Stream broker；投递、对账、恢复
 │   │       ├── progress_bus.py      # Redis Pub/Sub：worker 发布，web 扇出给观察者
 │   │       └── path_locks.py        # PathLockRegistry —— 「这个路径被占着吗」
 │   │
 │   ├── features/                    # ── 按业务能力切分 ──
 │   │   ├── catalog/                 # 视频元数据
-│   │   │   ├── video.py · video_tag.py · series.py  # 文档模型
+│   │   │   ├── video_model.py · video_tag_model.py · series_model.py  # 文档模型
 │   │   │   ├── catalog_service.py         # 搜索、建议、更新、观看记录、删除
 │   │   │   ├── series_service.py          # 系列成员关系与顺序的唯一写入方
 │   │   │   └── tag_operation_service.py   # 标签引用计数
 │   │   ├── browsing/                # 目录浏览与批量操作
-│   │   │   ├── dir_metadata.py · dir_metadata_service.py
+│   │   │   ├── dir_metadata_model.py · dir_metadata_service.py
 │   │   │   ├── directory_deletion.py      # DirectoryDeletionStrategy
 │   │   │   ├── browse_file_service.py     # 三级浏览、目录内搜索
 │   │   │   └── batch_operation_service.py # 批量更新/删除、流式进度
 │   │   ├── playback/                # 播放与缩略图（REST）
 │   │   │   └── video_stream_service.py · thumbnail_service.py · video_router.py
 │   │   └── migration/               # 文件迁移
-│   │       ├── migration_task.py          # 继承 BaseTaskModel
+│   │       ├── migration_task_model.py    # 继承 BaseTaskModel
+│   │       ├── migration_batch_model.py · migration_batch.py  # 批次：预检、窗口、汇总
+│   │       ├── device_slots.py            # 按设备分配复制名额
 │   │       └── migration_service.py       # TaskStateMachine 子类
 │   │
 │   ├── resolvers/                   # ── GraphQL 交付层：校验 → 委托 → 映射 ──
@@ -358,23 +389,30 @@ video-app/
 │           ├── migration_type.py · scalars.py
 │           └── pydantic_types/      # GraphQL 输入契约
 │
-├── tests/                           # 695 个用例（pytest --strict-markers），覆盖率 90%
-│   ├── conftest.py                  # test_settings、MongoDB、文档 factory
+├── tests/                           # 920 个用例（pytest --strict-markers），覆盖率 94%
+│   ├── conftest.py                  # test_settings、MongoDB / Redis 容器、文档 factory
 │   ├── unit/                        # 目录结构镜像 src/
 │   │   ├── test_architecture.py     # 依赖方向守卫（AST 扫描）
 │   │   ├── test_context_wiring.py · test_worker.py
-│   │   ├── platform/                # cache · jobs · media · storage
+│   │   ├── platform/                # redis · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
 │   │   └── schema/                  # Pydantic 输入契约
 │   ├── graphql/                     # 解析器测试（查询、变更、订阅）
-│   └── integration/                 # 端到端集成测试（testcontainers MongoDB）
+│   └── integration/                 # 全栈集成测试：按 feature 分目录，一个文件一条用户旅程
+│                                    #   （browsing · catalog · migration · journeys）
+│
+├── e2e/                             # Playwright 旅程，跑在完整的 compose 栈上
+│   ├── docker-compose.e2e.yml · e2e.env · seed.py   # 栈覆盖文件、一次性环境变量、测试数据
+│   └── journeys/                    # smoke · metadata-search · migration · batch-operations · multi-tab
 │
 └── front-end/video-app-front/
     ├── codegen.ts                   # GraphQL Codegen 配置
     ├── Dockerfile · nginx.conf      # 两阶段构建 → Nginx + 反向代理
-    └── src/app/
+    ├── src/test-setup.ts · src/testing/ # jsdom 补丁；共用测试数据与 Apollo 测试辅助
+    └── src/app/                     # 每个 *.ts 旁边都有对应的 *.spec.ts
         ├── app.ts · app.routes.ts · app.config.ts   # 根组件、路由、Apollo（HTTP + WS 分链路）
         ├── core/graphql/
+        │   ├── apollo-default-options.ts # 默认 fetch / error 策略，应用与测试共用
         │   ├── documents/           # queries · mutations · subscription · migration
         │   └── generated/graphql.ts # 自动生成 —— 不要手改
         ├── pages/
@@ -393,17 +431,19 @@ video-app/
         └── shared/
             ├── components/
             │   ├── video-card/ · pagination/ · header/ · sidebar/ · toast-displayer/
-            │   ├── video-player-host/     # 全项目唯一 import video.js 的文件
+            │   ├── video-player-host/     # 全项目唯一 import @videojs/html 的文件
             │   ├── video-edit-panel/ · batch-operation-panel/ · delete-check-panel/
             │   ├── new-folder-panel/ · search-panel/ · migration-panel/
-            │   ├── file-browse-table/ · bottom-toolbar/ · migration-task-list/
+            │   ├── file-browse-table/ · file-browse-grid/ # 表格与缩略图网格两种视图
+            │   ├── file-node-menu/ · file-thumbnail/      # 两种视图共用
+            │   ├── bottom-toolbar/ · migration-task-list/
             │   ├── series-panel/ · series-reorder-list/ · series-name-input/
             │   └── tag-chip-input/        # FormValueControl<string[]>
             ├── interceptor/ · models/
             └── environments/
 ```
 
-> **新增一种后台任务类型**：继承 `BaseTaskModel`（在子类上声明自己的 `Settings.name`）和 `TaskStateMachine[YourModel]`，实现三个阶段，再在 `dispatch.Queue` 里给它一条队列，并仿照 `src/worker.py` 写一个 worker 组装根。模板和 dispatcher 一行不用改——测试真的用第二种非迁移任务类型跑通了两者。
+> **新增一种后台任务类型**：继承 `BaseTaskModel`（在子类上声明自己的 `Settings.name`）和 `TaskStateMachine[YourModel]`，实现三个阶段，再在 `dispatch.Queue` 里给它一条队列，并仿照 `src/workers/worker_migration.py` 写一个 worker 组装根。模板和 dispatcher 一行不用改——测试真的用第二种非迁移任务类型跑通了两者。
 
 > **新增一种存储后端**：在 handler 上声明 `storage_type`、实现 `from_config(spec)`、加进 `_HANDLER_TYPES`，再往 `HandlerConfig` union 里加一个分类配置模型。`_create_handler` 不变，两条守卫测试把这两处登记互相钉死。
 
@@ -441,20 +481,20 @@ resource_paths:
 # thumbnail_config:
 #   storage_category: S3-resource
 #   storage_pseudo_name: Resource-1
+#   storage_retry_cooldown: 30.0     # 读写失败后跳过该存储的秒数
+
+redis:                           # 所有进程共用：缓存、任务队列、任务进度
+  url: $REDIS_URL|redis://localhost:6379/0
+  socket_timeout: 1.0            # Redis 不可达时降级为未命中
+  key_prefix: video-app
 
 cache_config:
-  cache_type: redis              # redis | cachetools（进程内）
-  key_prefix: video-app
   ttl:                           # 按用途分别设置的秒数，由各调用方写入时传入
     dir_metadata: 300
-  redis:
-    url: $REDIS_URL|redis://localhost:6379/0
-    socket_timeout: 1.0          # Redis 不可达时降级为未命中
-  cachetools:
-    max_size: 3000               # 最大条目数
 
 # 实际生效值为 max(ffmpeg_semaphore_limit, cpu_count // 2)
 ffmpeg_semaphore_limit: 4
+io_thread_pool_size: 32          # 阻塞式存储 IO（本地磁盘、S3 请求）的线程数
 
 suggestion_limit:
   name: 10
@@ -472,6 +512,7 @@ video_extensions:
   - .m4v
   - .mpg
   - .mpeg
+  - .ts
 
 # 必须与前端 environment.ts 保持同步
 validation:
@@ -483,10 +524,10 @@ validation:
   page_number_min: 1
   page_number_max: 10000
   series_name_max_length: 100
+  migration_batch_max_size: 500
+  migration_page_size_max: 100
 
 tasks:
-  redis_url: $REDIS_URL|redis://localhost:6379/0
-                                 # web 进程与 worker 之间的任务队列和进度帧。
   max_concurrent: 4              # 所有设备合计同时复制的迁移数。
   slots_per_device:              # 单个设备上同时复制的数量，按存储类型。同一块机械硬盘上
     local_fs: 1                  # 并发复制，总吞吐反而不如一路。
@@ -498,6 +539,8 @@ tasks:
   progress_flush_interval: 1.0   # 进度落库的间隔（秒），也是取消请求到达运行中任务的最长延迟。
   observe_watchdog_interval: 10.0  # 订阅多少秒没收到帧就去查一次 DB（worker 崩溃时不会发结束帧）。
   reconcile_interval: 300.0      # 重新投递「消息可能随 Redis 丢失」的 PENDING 任务的间隔（秒）。
+  batch_window: 2                # 同一批次同时运行的子任务数，避免一个批次占满所有名额。
+  latest_frame_ttl: 60           # 任务最新进度帧的保留秒数，供晚到的观察者读取。
 
 logging:
   log_dir: logs

@@ -9,7 +9,8 @@ holding the id of a video that no longer exists.
 
 import pytest
 
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.storage.absolute_path import AbsolutePath
 from tests.series_helpers import series_name_of, stored_series
 

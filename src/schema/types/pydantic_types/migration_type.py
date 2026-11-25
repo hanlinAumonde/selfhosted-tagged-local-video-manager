@@ -1,11 +1,8 @@
 from pydantic import BaseModel, field_validator
 
-from src.schema.types.pydantic_types.fileBrowe_type import RelativePathInputModel
-
-#: Files one batch request may move. Each is checked and inserted one by one, so this
-#: bounds how long a single request takes.
-MAX_BATCH_SIZE = 500
-
+from src.config import get_settings
+from src.constants.schema import MIGRATION_PAGE_SIZE_DEFAULT
+from src.schema.types.pydantic_types.fileBrowse_type import RelativePathInputModel
 
 def _validate_conflict_strategy(v: str | None) -> str | None:
     if v is not None and v not in ("overwrite", "rename", "skip"):
@@ -38,8 +35,9 @@ class MigrationBatchPreflightInputModel(BaseModel):
     def validate_source_video_ids(cls, v: list[str]) -> list[str]:
         if not v:
             raise ValueError("a batch needs at least one source video")
-        if len(v) > MAX_BATCH_SIZE:
-            raise ValueError(f"a batch can move at most {MAX_BATCH_SIZE} videos")
+        max_size = get_settings().validation.migration_batch_max_size
+        if len(v) > max_size:
+            raise ValueError(f"a batch can move at most {max_size} videos")
         if len(set(v)) != len(v):
             raise ValueError("source video ids must not repeat")
         return v
@@ -65,7 +63,7 @@ class MigrationBatchActionInputModel(BaseModel):
 class MigrationTaskQueryInputModel(BaseModel):
     status_filter: list[str] | None = None
     page: int = 1
-    page_size: int = 20
+    page_size: int = MIGRATION_PAGE_SIZE_DEFAULT
     batch_id: str | None = None
 
     @field_validator("page", mode="after")
@@ -78,6 +76,7 @@ class MigrationTaskQueryInputModel(BaseModel):
     @field_validator("page_size", mode="after")
     @classmethod
     def validate_page_size(cls, v: int) -> int:
-        if v < 1 or v > 100:
-            raise ValueError("page_size must be between 1 and 100")
+        max_size = get_settings().validation.migration_page_size_max
+        if v < 1 or v > max_size:
+            raise ValueError(f"page_size must be between 1 and {max_size}")
         return v

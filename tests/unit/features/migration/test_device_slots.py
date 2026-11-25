@@ -11,7 +11,9 @@ import pytest
 
 from src.config import Settings
 from src.features.migration.device_slots import Device, DeviceSlots, device_of
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
+
 
 pytestmark = pytest.mark.unit
 

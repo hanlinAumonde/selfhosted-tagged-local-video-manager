@@ -3,7 +3,7 @@
 from bson import ObjectId
 import pytest
 
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from tests.graphql.helpers import (
     RECORD_VIDEO_VIEW,
     assert_error_contains,

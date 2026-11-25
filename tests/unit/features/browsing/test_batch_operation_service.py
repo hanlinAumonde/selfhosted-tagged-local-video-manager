@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from src.features.catalog.video import VideoModel
-from src.features.catalog.video_tag import VideoTagModel
+from src.features.catalog.video_model import VideoModel
+from src.features.catalog.video_tag_model import VideoTagModel
 from src.features.browsing.batch_operation_service import BatchResultType
 from src.schema.types.pydantic_types.batch_operation_type import (
     SeriesOperationInputModel,

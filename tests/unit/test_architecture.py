@@ -16,17 +16,13 @@ pytestmark = pytest.mark.unit
 SRC = Path(__file__).resolve().parents[2] / "src"
 
 # Presentation modules: they define the strawberry types the schema is built from.
-#: Modules that define Beanie documents, one per feature that owns a collection.
-DOCUMENT_MODULES = {
-    "src.features.catalog.video",
-    "src.features.catalog.video_tag",
-    "src.features.browsing.dir_metadata",
-    "src.features.migration.migration_task",
-}
+#: Beanie documents live in their own ``*_model.py`` modules (project naming rule), so the
+#: suffix identifies them without a hand-kept list that a new collection could be missing from.
+DOCUMENT_MODULE_SUFFIX = "_model"
 
 
 def _is_document_module(name: str) -> bool:
-    return name in DOCUMENT_MODULES
+    return name.endswith(DOCUMENT_MODULE_SUFFIX)
 
 
 PRESENTATION_MODULES = {
@@ -190,25 +186,41 @@ class TestPlatformStaysGeneric:
 
         assert offenders == [], f"platform modules importing fastapi: {offenders}"
 
+class TestRedisHasOneOwner:
+    """Every Redis connection, key name and "Redis is down" policy lives in
+    ``src/platform/redis``. A module that builds its own client is a second answer to all
+    three — another pool, another timeout, another prefix concatenation."""
 
-class TestTaskiqStaysAtTheEdge:
-    """The broker library is a delivery detail of two modules; the state machine, the
-    features and the web layer only ever see a dispatcher."""
-
-    # Scenario: taskiq is confined to the dispatcher and the worker's assembly root
-    #   Given every module under src
+    # Scenario: only the Redis platform module talks to Redis directly
+    #   Given every module under src/
     #   When their imports are scanned
-    #   Then only src/platform/jobs/dispatch.py and src/worker.py import taskiq or taskiq_redis
-    def test_taskiq_is_imported_only_by_dispatch_and_worker(self):
-        allowed = {"src/platform/jobs/dispatch.py", "src/worker.py"}
-        importers = {
-            _relative(path)
-            for path in SRC.rglob("*.py")
-            if "__pycache__" not in path.parts
-            and any(
-                name.split(".")[0] in ("taskiq", "taskiq_redis")
-                for name in _imported_modules(path)
-            )
-        }
+    #   Then the only modules importing redis (redis, redis.asyncio, redis.exceptions, ...)
+    #       are under src/platform/redis
+    def test_only_the_redis_platform_module_imports_redis(self):
+        offenders = _modules_importing("redis", allowed_under=SRC / "platform" / "redis")
 
-        assert importers - allowed == set(), f"modules importing taskiq: {sorted(importers - allowed)}"
+        assert offenders == [], f"modules importing redis outside src/platform/redis: {offenders}"
+
+    # Scenario: the queue broker's Redis client stays with the workers
+    #   Given every module under src/
+    #   When their imports are scanned
+    #   Then the only modules importing taskiq_redis are under src/workers — taskiq-redis
+    #       builds its own connection pool from a URL and cannot share RedisService's
+    def test_only_the_workers_import_taskiq_redis(self):
+        offenders = _modules_importing("taskiq_redis", allowed_under=SRC / "workers")
+
+        assert offenders == [], f"modules importing taskiq_redis outside src/workers: {offenders}"
+
+
+def _modules_importing(package: str, allowed_under: Path) -> list[str]:
+    """Modules under src/, outside ``allowed_under``, that import ``package`` or a submodule."""
+    return sorted(
+        _relative(path)
+        for path in SRC.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and not path.is_relative_to(allowed_under)
+        and any(
+            name == package or name.startswith(f"{package}.")
+            for name in _imported_modules(path)
+        )
+    )

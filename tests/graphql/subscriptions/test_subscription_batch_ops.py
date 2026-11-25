@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.features.migration.migration_task import TaskStatus
+from src.platform.jobs.task_model import TaskStatus
 
 from src.features.browsing.batch_operation_service import (
     BatchProgress,

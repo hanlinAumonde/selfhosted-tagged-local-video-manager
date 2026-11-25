@@ -9,21 +9,18 @@ class CacheTTLConfig(BaseModel):
     dir_metadata: int = 300
 
 
-class RedisCacheConfig(BaseModel):
+class RedisConfig(BaseModel):
+    """The one Redis every process shares: cache entries, task queues and progress."""
+
     url: str = "redis://localhost:6379/0"
+    # Applies to every call, so a Redis that stops answering costs one timeout per call.
     socket_timeout: float = 1.0
-
-
-class CachetoolsCacheConfig(BaseModel):
-    max_size: int = 3000
+    # First segment of every key, queue and channel this application writes.
+    key_prefix: str = "video-app"
 
 
 class CacheConfig(BaseModel):
-    cache_type: Literal["redis", "cachetools"] = "cachetools"
-    key_prefix: str = "video-app"
     ttl: CacheTTLConfig = CacheTTLConfig()
-    redis: RedisCacheConfig = RedisCacheConfig()
-    cachetools: CachetoolsCacheConfig = CachetoolsCacheConfig()
 
 class PageSize(BaseModel):
     homepage_videos: int = 10
@@ -54,6 +51,10 @@ class ValidationConfig(BaseModel):
     page_number_min: int = 1
     page_number_max: int = 10000
     series_name_max_length: int = 100
+    # Each source of a batch is checked and inserted one by one, so this bounds how long
+    # a single batch request takes.
+    migration_batch_max_size: int = 500
+    migration_page_size_max: int = 100
 
 
 class LoggingConfig(BaseModel):
@@ -63,8 +64,6 @@ class LoggingConfig(BaseModel):
 
 
 class TaskConfig(BaseModel):
-    # Redis that carries task queues and progress between the web process and workers.
-    redis_url: str = "redis://localhost:6379/0"
     # How many migrations may copy at the same time, across every device.
     max_concurrent: int = 4
     # Copies allowed at once on one device, by storage type. Several copies on one
@@ -84,6 +83,11 @@ class TaskConfig(BaseModel):
     observe_watchdog_interval: float = 10.0
     # How often (seconds) a worker re-sends PENDING tasks whose message may have been lost.
     reconcile_interval: float = 300.0
+    # Children of one batch a worker runs at once. Device slots already bound the real
+    # concurrency; the window only keeps one batch from taking every global slot.
+    batch_window: int = 2
+    # Seconds a task's latest progress frame is kept for observers that attach late.
+    latest_frame_ttl: int = 60
 
 
 class S3HandlerConfig(BaseModel):
@@ -123,6 +127,8 @@ HandlerConfig = Annotated[
 class ThumbnailConfig(BaseModel):
     storage_category: str = ""
     storage_pseudo_name: str = ""
+    # Seconds the thumbnail storage is skipped after it failed once.
+    storage_retry_cooldown: float = 30.0
 
 
 class Settings(BaseSettings):
@@ -132,6 +138,7 @@ class Settings(BaseSettings):
     handler_config: dict[str, HandlerConfig] = Field(default_factory=dict)
     thumbnail_config: ThumbnailConfig = ThumbnailConfig()
     ROOT_PATH: Optional[str] = None
+    redis: RedisConfig = RedisConfig()
     cache_config: CacheConfig = CacheConfig()
     ffmpeg_semaphore_limit: int = 4
     io_thread_pool_size: int = 32
@@ -149,10 +156,15 @@ class Settings(BaseSettings):
         The default lives here rather than in the dispatcher: which backend serves
         an unconfigured category is a statement about configuration, and the
         dispatcher should only ever look up whatever type it is handed.
+
+        :param category: A category name from ``resource_paths``.
+        :type category: str
+        :rtype: HandlerConfig
         """
         return self.handler_config.get(category) or LocalFSCategoryConfig()
 
     def get_valid_categories(self) -> list[str]:
+        """The configured category names, in the order ``resource_paths`` lists them."""
         return list(self.resource_paths.keys())
 
     def get_all_host_paths(self) -> set[str]:
@@ -185,6 +197,13 @@ class Settings(BaseSettings):
 _settings : Settings | None = None
 
 def init_settings():
+    """
+    Load the settings once per process from config.yaml, ``.env`` and the environment,
+    in rising order of precedence.
+
+    :return: The process-wide settings; later calls return the same instance.
+    :rtype: Settings
+    """
     global _settings
     if _settings is None:
         import os
@@ -194,6 +213,12 @@ def init_settings():
     return _settings
 
 def get_settings() -> Settings:
+    """
+    The settings loaded by ``init_settings``.
+
+    :raises RuntimeError: If ``init_settings`` has not run in this process.
+    :rtype: Settings
+    """
     if _settings is None:
         raise RuntimeError("Settings have not been initialized. Call init_settings() first.")
     return _settings

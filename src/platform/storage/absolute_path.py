@@ -22,6 +22,11 @@ class AbsolutePath:
 
         :param parsedPath: A tuple of (category, pseudo_name, sub_path) or None for root level.
         :type parsedPath: tuple[str, str | None, str | None] | None
+        :param handlerService: Supplies the handler of the path's category.
+        :type handlerService: ResourceHandlerService | None
+        :param settings: Used to check the category and pseudo name are configured.
+        :type settings: Settings | None
+        :raises FileBrowseError: If the category or pseudo name is not configured.
         :return: An AbsolutePath instance representing the resolved absolute path.
         :rtype: AbsolutePath
         """
@@ -49,6 +54,8 @@ class AbsolutePath:
         :type path: str
         :param category: The category of the path.
         :type category: str
+        :param handler: The handler of that category, needed by the format conversions.
+        :type handler: BaseResourceHandler | None
         :return: An AbsolutePath instance representing the existing path.
         :rtype: AbsolutePath
         """
@@ -73,7 +80,12 @@ class AbsolutePath:
         return self.handler.get_path_standard_format(self.abs_path)
 
     def update_path(self, new_abs_path: str) -> None:
-        """Update the absolute path to a new value."""
+        """
+        Update the absolute path to a new value.
+
+        :param new_abs_path: The new path, in the same format the instance was built with.
+        :type new_abs_path: str
+        """
         self.abs_path = new_abs_path
 
     def is_root_level(self) -> bool:

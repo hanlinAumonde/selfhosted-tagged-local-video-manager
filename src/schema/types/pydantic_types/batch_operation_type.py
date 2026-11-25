@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.config import get_settings
 from src.features.browsing.directory_deletion import DirectoryDeletionStrategy
-from src.schema.types.pydantic_types.fileBrowe_type import RelativePathInputModel
+from src.schema.types.pydantic_types.fileBrowse_type import RelativePathInputModel
 
 class SeriesOrderEntryInputModel(BaseModel):
     videoId: str

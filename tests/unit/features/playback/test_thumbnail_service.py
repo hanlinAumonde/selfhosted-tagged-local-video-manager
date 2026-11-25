@@ -3,12 +3,12 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 
 from src.config import Settings
-from src.features.catalog.video import VideoModel
+from src.errors import InputValidationError, VideoFileNotFoundError, VideoNotFoundError
+from src.features.catalog.video_model import VideoModel
 from src.features.playback.thumbnail_service import StorageBreaker, ThumbnailService
-from .conftest import run_attached_work
+from .conftest import STORAGE_COOLDOWN, run_attached_work
 
 pytestmark = pytest.mark.unit
 
@@ -22,28 +22,25 @@ def _expected_key(svc: ThumbnailService, video: VideoModel) -> str:
 # ------------------- Missing video / file edge cases --------------------
 # -----------------------------------------------------------------------
 
-async def test_get_thumbnail_empty_id_raises_400(thumb_svc, init_db):
-    with pytest.raises(HTTPException) as exc_info:
+async def test_get_thumbnail_empty_id_raises_input_validation_error(thumb_svc, init_db):
+    with pytest.raises(InputValidationError):
         await thumb_svc.get_thumbnail("")
-    assert exc_info.value.status_code == 400
 
 
-async def test_get_thumbnail_unknown_id_raises_404(thumb_svc, init_db):
+async def test_get_thumbnail_unknown_id_raises_video_not_found(thumb_svc, init_db):
     from bson import ObjectId
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(VideoNotFoundError):
         await thumb_svc.get_thumbnail(str(ObjectId()))
-    assert exc_info.value.status_code == 404
 
 
-async def test_get_thumbnail_file_missing_raises_404(
+async def test_get_thumbnail_file_missing_raises_video_file_not_found(
     thumb_svc, init_db, video_factory, handler,
 ):
     video = await video_factory(name="v")
     handler.stat.return_value = None
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(VideoFileNotFoundError):
         await thumb_svc.get_thumbnail(str(video.id))
-    assert exc_info.value.status_code == 404
 
 
 # -----------------------------------------------------------------------
@@ -200,7 +197,7 @@ def test_storage_init_category_not_found(handler_svc, ffmpeg_svc):
         resource_handler_service=handler_svc,
         ffmpeg_service=ffmpeg_svc,
         settings=settings,
-        storage_breaker=StorageBreaker(),
+        storage_breaker=StorageBreaker(STORAGE_COOLDOWN),
     )
     assert svc._storage_handler is None
 

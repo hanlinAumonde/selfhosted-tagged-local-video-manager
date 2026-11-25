@@ -4,6 +4,23 @@ class VideoNotFoundError(Exception):
         super().__init__(f"Video with ID {video_id} not found")
 
 
+class VideoFileNotFoundError(Exception):
+    """The video record exists but its file is no longer in storage."""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__(f"Video file not found: {path}")
+
+
+class InvalidRangeError(Exception):
+    """A Range request that starts or ends past the end of the file."""
+
+    def __init__(self, file_size: int):
+        # A 416 must say how large the file is, so the client can ask again.
+        self.file_size = file_size
+        super().__init__(f"Requested range is outside a file of {file_size} bytes")
+
+
 class InvalidPathError(Exception):
     def __init__(self, path: str):
         self.path = path

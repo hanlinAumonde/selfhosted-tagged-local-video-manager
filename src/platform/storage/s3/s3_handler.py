@@ -39,9 +39,8 @@ def _object_info(obj: dict) -> FileInfo:
 class S3ResourceHandler(BaseResourceHandler):
     """Resource handler for S3-compatible object storage (MinIO, RustFS, etc.)."""
 
-    # S3 key prefixes for different content types
+    # S3 key prefix of video objects
     VIDEO_PREFIX = "videos"
-    THUMBNAIL_PREFIX = "thumbnails"
 
     storage_type = "s3"
 
@@ -51,6 +50,17 @@ class S3ResourceHandler(BaseResourceHandler):
     #: Bytes per part of a server-side copy. Each part is one request, so this bounds how
     #: long a request runs and how long a cancel waits; S3 allows no less than 5 MB.
     COPY_PART_SIZE = 16 * 1024 * 1024
+
+    #: Bytes per part of a multipart upload; S3 refuses any part but the last below 5 MB.
+    UPLOAD_PART_SIZE = 5 * 1024 * 1024
+
+    #: Seconds the client waits for a response before retrying.
+    READ_TIMEOUT = 10
+    CONNECT_TIMEOUT = 5
+
+    #: Seconds a pre-signed URL handed to ffmpeg stays valid. It must outlast the
+    #: longest transcode, which reads from the URL until the stream ends.
+    PRESIGNED_URL_EXPIRY = 3600
 
     @classmethod
     def from_config(cls, spec: HandlerBuildSpec) -> "S3ResourceHandler":
@@ -85,8 +95,8 @@ class S3ResourceHandler(BaseResourceHandler):
                 config=Config(
                     signature_version='s3v4',
                     #s3={'addressing_style': 'path'},
-                    connect_timeout=5,
-                    read_timeout=10,
+                    connect_timeout=self.CONNECT_TIMEOUT,
+                    read_timeout=self.READ_TIMEOUT,
                     retries={
                         "total_max_attempts": 3,
                         "max_attempts": 3,
@@ -127,10 +137,6 @@ class S3ResourceHandler(BaseResourceHandler):
     def _build_video_key(self, pseudo_name: str, relative_path: str) -> str:
         """Build S3 key for a video file."""
         return posixpath.join(self.VIDEO_PREFIX, pseudo_name, relative_path)
-
-    def _build_thumbnail_key(self, pseudo_name: str, relative_path: str) -> str:
-        """Build S3 key for a thumbnail file."""
-        return posixpath.join(self.THUMBNAIL_PREFIX, pseudo_name, relative_path)
 
     def _parse_logical_path(self, logical_path: str) -> tuple[str, str]:
         """
@@ -322,8 +328,6 @@ class S3ResourceHandler(BaseResourceHandler):
     async def write_file_streaming(self, path: str, data_stream: AsyncIterator[bytes]) -> int:
         client, bucket = self._target(path)
 
-        MIN_PART_SIZE = 5 * 1024 * 1024  # 5MB — S3 minimum part size
-
         mpu = await asyncio.to_thread(
             client.create_multipart_upload,
             Bucket=bucket,
@@ -341,9 +345,9 @@ class S3ResourceHandler(BaseResourceHandler):
                 buffer.extend(chunk)
                 total_written += len(chunk)
 
-                while len(buffer) >= MIN_PART_SIZE:
-                    part_data = bytes(buffer[:MIN_PART_SIZE])
-                    buffer = bytearray(buffer[MIN_PART_SIZE:])
+                while len(buffer) >= self.UPLOAD_PART_SIZE:
+                    part_data = bytes(buffer[:self.UPLOAD_PART_SIZE])
+                    buffer = bytearray(buffer[self.UPLOAD_PART_SIZE:])
 
                     response = await asyncio.to_thread(
                         client.upload_part,
@@ -503,7 +507,7 @@ class S3ResourceHandler(BaseResourceHandler):
             return client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": bucket, "Key": path},
-                ExpiresIn=3600,
+                ExpiresIn=self.PRESIGNED_URL_EXPIRY,
             )
         except Exception:
             return None

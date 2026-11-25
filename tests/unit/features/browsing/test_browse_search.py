@@ -16,7 +16,7 @@ import pytest
 
 from src.errors import InputValidationError
 from src.features.browsing.browse_file_service import DirectorySearchCriteria, VideoEntry
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.platform.storage.absolute_path import AbsolutePath
 
 pytestmark = pytest.mark.unit

@@ -7,11 +7,14 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from src.platform.redis.redis_service import RedisService
+
 from src import context as context_module
 from src.config import Settings
 from src.features.migration.device_slots import Device
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
-from src.worker import MigrationWorker
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
+from src.workers.worker_migration import MigrationWorker
 from tests.broker_helpers import RecordingBroker
 
 pytestmark = pytest.mark.unit
@@ -23,26 +26,32 @@ TARGET_DB = "Target-category/Target-resource/movie_a.mp4"
 @pytest.fixture
 def worker_settings(two_category_settings: Settings, redis_url: str, monkeypatch) -> Settings:
     payload = two_category_settings.model_dump()
-    payload["tasks"]["redis_url"] = redis_url
-    payload["cache_config"]["key_prefix"] = "worker-test"
+    payload["redis"]["url"] = redis_url
+    payload["redis"]["key_prefix"] = "worker-test"
     settings = Settings.model_validate(payload)
     monkeypatch.setattr("src.config._settings", settings)
     return settings
 
 
 @pytest_asyncio.fixture
-async def redis(redis_url):
-    client = Redis.from_url(redis_url, decode_responses=True)
-    yield client
-    await client.aclose()
+async def redis_service(worker_settings: Settings):
+    service = RedisService(worker_settings.redis)
+    yield service
+    await service.aclose()
+
+
+@pytest.fixture
+def redis(redis_service: RedisService) -> Redis:
+    """The worker's own client, for inspecting what it wrote."""
+    return redis_service.client
 
 
 @pytest_asyncio.fixture
-async def worker_factory(worker_settings, redis, init_db):
+async def worker_factory(worker_settings, redis_service, init_db):
     workers: list[MigrationWorker] = []
 
     def _create(settings: Settings = worker_settings, broker=None) -> MigrationWorker:
-        worker = MigrationWorker(settings, broker or RecordingBroker(), redis)
+        worker = MigrationWorker(settings, broker or RecordingBroker(), redis_service)
         workers.append(worker)
         return worker
 

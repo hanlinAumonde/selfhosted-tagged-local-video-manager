@@ -19,7 +19,8 @@ from src.features.migration.migration_batch import (
     SkippedSource,
 )
 from src.features.migration.migration_service import MigrationPreflightResult
-from src.features.migration.migration_task import MigrationTaskModel, TaskStatus
+from src.features.migration.migration_task_model import MigrationTaskModel
+from src.platform.jobs.task_model import TaskStatus
 from src.platform.jobs.progress import ProgressFrame
 from tests.graphql.helpers import (
     CANCEL_MIGRATION_BATCH,

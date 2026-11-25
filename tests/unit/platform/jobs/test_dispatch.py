@@ -10,7 +10,9 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from taskiq import InMemoryBroker
 
-from src.platform.jobs.dispatch import Queue, TaskDispatcher, build_broker
+from src.config import RedisConfig
+from src.platform.redis.redis_service import RedisService
+from src.workers.dispatch import Queue, TaskDispatcher, build_broker
 from src.platform.jobs.task_model import TaskStatus
 from tests.broker_helpers import RecordingBroker
 from tests.unit.platform.jobs.reindex import ReindexStateMachine, ReindexTaskModel
@@ -37,8 +39,9 @@ class TestQueueBrokers:
     def test_each_queue_reads_its_own_stream_and_consumer_group(self):
         # Given key prefix "video-app"
         # When brokers are built for the "migration" and "scan" queues
-        migration = build_broker(Queue.MIGRATION, "redis://localhost:6379/0", "video-app")
-        scan = build_broker("scan", "redis://localhost:6379/0", "video-app")
+        redis = RedisService(RedisConfig(key_prefix="video-app"))
+        migration = build_broker(Queue.MIGRATION, redis)
+        scan = build_broker("scan", redis)
 
         # Then their stream keys differ from each other and from taskiq's default "taskiq"
         assert len({migration.queue_name, scan.queue_name, "taskiq"}) == 3
@@ -47,6 +50,20 @@ class TestQueueBrokers:
         # And both stream keys start with "video-app:"
         assert migration.queue_name.startswith("video-app:")
         assert scan.queue_name.startswith("video-app:")
+
+
+    def test_migration_queue_keeps_its_deployed_stream_and_group_names(self):
+        # Given a RedisService whose key_prefix is "video-app"
+        redis = RedisService(RedisConfig(key_prefix="video-app"))
+
+        # When the broker for the migration queue is built from it
+        broker = build_broker(Queue.MIGRATION, redis)
+
+        # Then its stream key is "video-app:queue:migration"
+        assert broker.queue_name == "video-app:queue:migration"
+        # And its consumer group is "video-app:migration-worker" — renaming either on an
+        #   upgrade strands the messages already queued under the old names
+        assert broker.consumer_group_name == "video-app:migration-worker"
 
 
 class TestSubmit:

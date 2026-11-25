@@ -105,16 +105,12 @@ def build_integration_settings(
     """Settings pointing at the given resource directories and the test Redis, installed
     as the process-wide settings the way init_settings() would.
 
-    The cache is Redis, as deployed: the worker refreshes directory metadata through its
-    own cache client, and a per-process cache would leave the web side reading stale
-    sizes. Every test gets its own key prefix, so cached entries and progress channels
-    never leak from one test into the next."""
+    Every test gets its own key prefix, so cached entries and progress channels never
+    leak from one test into the next."""
     payload = test_settings.model_dump()
     payload["resource_paths"] = resource_paths
-    payload["tasks"]["redis_url"] = redis_url
-    payload["cache_config"]["cache_type"] = "redis"
-    payload["cache_config"]["redis"]["url"] = redis_url
-    payload["cache_config"]["key_prefix"] = f"integration-{uuid4().hex[:12]}"
+    payload["redis"]["url"] = redis_url
+    payload["redis"]["key_prefix"] = f"integration-{uuid4().hex[:12]}"
     settings = Settings.model_validate(payload)
     monkeypatch.setattr(config, "_settings", settings)
     return settings

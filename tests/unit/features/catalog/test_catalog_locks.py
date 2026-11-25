@@ -144,7 +144,7 @@ async def test_delete_video_proceeds_when_the_registry_reports_nothing(
 
     await svc.delete_video(str(video.id))
 
-    from src.features.catalog.video import VideoModel
+    from src.features.catalog.video_model import VideoModel
     assert await VideoModel.get(video.id) is None
 
 

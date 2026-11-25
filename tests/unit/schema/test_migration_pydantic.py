@@ -2,12 +2,20 @@
 
 import pytest
 
+from src.config import Settings
+
 from src.schema.types.pydantic_types.migration_type import (
     CreateMigrationTaskInputModel,
     MigrationTaskQueryInputModel,
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _use_settings(monkeypatch, test_settings: Settings, section: str, **values) -> None:
+    payload = test_settings.model_dump()
+    payload[section].update(values)
+    monkeypatch.setattr("src.config._settings", Settings.model_validate(payload))
 
 
 class TestCreateMigrationTaskInputModel:
@@ -51,3 +59,20 @@ class TestMigrationTaskQueryInputModel:
     def test_status_filter(self):
         model = MigrationTaskQueryInputModel(status_filter=["PENDING", "PROCESSING"])
         assert model.status_filter == ["PENDING", "PROCESSING"]
+
+
+class TestConfiguredPageSize:
+    def test_the_largest_page_size_comes_from_the_configuration(self, test_settings, monkeypatch):
+        """
+        Scenario: the largest page a client may ask for is a setting
+          Given validation.migration_page_size_max is 10
+          When a migration task query asks for page_size 11
+          Then a validation error is raised
+          And with page_size 10 it is accepted
+        """
+        _use_settings(monkeypatch, test_settings, "validation", migration_page_size_max=10)
+
+        with pytest.raises(ValueError, match="page_size must be between"):
+            MigrationTaskQueryInputModel(page_size=11)
+
+        assert MigrationTaskQueryInputModel(page_size=10).page_size == 10

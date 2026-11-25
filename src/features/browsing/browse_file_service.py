@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 
 from pymongo import UpdateOne
 
+from src.constants.storage import NAME_SEPARATORS
 from src.config import Settings
-from src.features.catalog.video import VideoModel
+from src.features.catalog.video_model import VideoModel
 from src.errors import DatabaseOperationError, FileBrowseError, InputValidationError
 from src.logger import get_logger
 from src.features.browsing.dir_metadata_service import DirFlags, DirMetadataService
@@ -66,10 +67,6 @@ BrowseEntry = DirectoryEntry | VideoEntry
 
 #: Decides whether one video file met during a directory walk belongs in the result.
 SearchOperator = Callable[[FileInfo], bool | None]
-
-#: Characters that would make a new directory name address something other than a single
-#: child of the directory the user is looking at.
-_NAME_SEPARATORS = ("/", "\\")
 
 
 def _keyword(value: str | None) -> str | None:
@@ -434,7 +431,7 @@ class BrowseFileService:
         cleaned = (name or "").strip()
         if not cleaned:
             raise InputValidationError(field="name", issue="folder name must not be blank")
-        if any(separator in cleaned for separator in _NAME_SEPARATORS):
+        if any(separator in cleaned for separator in NAME_SEPARATORS):
             raise InputValidationError(
                 field="name", issue="folder name must not contain a path separator"
             )

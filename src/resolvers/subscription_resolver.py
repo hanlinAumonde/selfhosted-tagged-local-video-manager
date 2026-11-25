@@ -25,6 +25,10 @@ async def resolve_batch_operations(input: VideosBatchOperationInput,
 
     :param input: Input containing video IDs or relative path for batch operation.
     :type input: VideosBatchOperationInput
+    :param update: True to update the selected videos, False to delete them.
+    :type update: bool
+    :param info: Strawberry GraphQL info object.
+    :type info: strawberry.Info
     :return: An asynchronous generator yielding the status of the batch update operation.
     :rtype: AsyncGenerator[BatchOperationStatus, None]
     """
