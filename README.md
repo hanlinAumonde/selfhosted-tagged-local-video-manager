@@ -30,10 +30,10 @@ resolvers/ + schema/   GraphQL delivery — validate, delegate, map
         ↓
 features/              catalog · browsing · playback · migration
         ↓
-platform/              storage · media · cache · jobs (reusable, knows no feature)
+platform/              storage · media · redis · jobs (reusable, knows no feature)
 ```
 
-**The direction is enforced, not just documented.** `tests/unit/test_architecture.py` parses every module's imports and fails the build if a feature imports strawberry or a GraphQL type, if a resolver imports a document model, or if `platform/` imports a feature. A reversed import is invisible in review and in green tests — it only surfaces later as a service that cannot be reused and a directory-walk test that has to build a GraphQL schema.
+**The direction is enforced, not just documented.** `tests/unit/test_architecture.py` parses every module's imports and fails the build if a feature imports strawberry or a GraphQL type, if a resolver imports a document model, or if `platform/` imports a feature. Two more keep Redis in one place: only `platform/redis/` may import `redis`, and only `src/workers/` may import `taskiq_redis`. A reversed import is invisible in review and in green tests — it only surfaces later as a service that cannot be reused and a directory-walk test that has to build a GraphQL schema.
 
 <!-- TODO: architecture diagram -->
 
@@ -50,7 +50,6 @@ platform/              storage · media · cache · jobs (reusable, knows no fea
 | PyMongo | 4.18 | Async MongoDB driver |
 | Pydantic | 2.13.5 | Input contracts and settings |
 | boto3 | 1.43+ | S3-compatible storage |
-| cachetools | 7.2+ | In-memory TTL cache |
 | loguru | 0.7+ | Structured logging |
 | envyaml | 1.10+ | `$VAR\|default` substitution in `config.yaml` |
 | pytest | 9.1+ | Testing (unit + GraphQL + integration) |
@@ -62,22 +61,25 @@ platform/              storage · media · cache · jobs (reusable, knows no fea
 | Angular | 22.1 | UI framework (standalone, signals, zoneless) |
 | Signal Forms | 22.1 | The only form implementation; no `ReactiveFormsModule` |
 | TypeScript | 6.0 | Language |
-| Apollo Angular | 13.0 | GraphQL client |
+| Apollo Angular | 14.2 | GraphQL client (`@apollo/client` 4.3) |
 | graphql-ws | 6.0 | WebSocket subscriptions |
 | Angular Material | 22.1 | UI component library |
 | Tailwind CSS | 4.1 | Styling framework |
-| Video.js | 8.23 | Video player |
+| Video.js | 10 (`@videojs/html`) | Video player (custom elements) |
 | graphql-codegen | 6.1 | TypeScript types + Apollo services generation |
-| Vitest | 4.0 | Unit testing |
+| Vitest | 4.0 | Unit and component testing (`@vitest/coverage-v8`) |
+| Playwright | 1.65 | End-to-end testing against the full stack |
 
 ### Deployment
 
 | Technology | Version | Purpose |
 | ---------- | ------- | ------- |
-| Docker Compose | - | Orchestration (frontend / backend / MongoDB / RustFS) |
+| Docker Compose | - | Orchestration (frontend / backend / migration worker / MongoDB / Redis / RustFS) |
 | Nginx | alpine | Frontend server + reverse proxy |
 | ffmpeg / ffprobe | - | Thumbnails, duration probing, on-the-fly transcoding |
 | RustFS / MinIO | - | S3-compatible object storage (optional) |
+| Redis | 8 | Cache, task queues (Redis Streams), progress Pub/Sub |
+| GitHub Actions | - | CI: tests → e2e → push the tested images to Docker Hub |
 
 ## Features
 
@@ -134,10 +136,11 @@ Requirements:
 | uv | latest | Yes | Python package manager |
 | Node.js | 24+ | Yes | Frontend build |
 | MongoDB | 6.0+ | Yes | Database |
+| Redis | 7+ | Yes | Cache, task queues, task progress |
 | ffmpeg / ffprobe | - | Yes | Thumbnails, duration, transcoding |
 | Docker | - | Recommended | One-command deployment (see below) |
 
-> If you prefer not to install MongoDB locally, start just that service from `docker-compose.yml`.
+> If you prefer not to install MongoDB and Redis locally, start just those two services: `docker-compose up -d mongodb redis`.
 
 ### 1. Clone the project
 
@@ -190,12 +193,12 @@ uv sync
 uv run main.py
 ```
 
-The backend runs at `http://localhost:12000`. It needs Redis (`REDIS_URL`) for the task queues even when the cache uses `cachetools`.
+The backend runs at `http://localhost:12000`. It needs Redis (`REDIS_URL`): the cache, the task queues and task progress all live there.
 
 **Migration worker** (a second terminal; migrations stay queued until it runs):
 
 ```bash
-uv run taskiq worker src.worker:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
+uv run taskiq worker src.workers.worker_migration:create_broker --workers 1 --ack-type when_received --max-async-tasks 16
 ```
 
 Run exactly one worker process (`--workers 1`): on startup it treats every unfinished migration as its own orphan and resumes it.
@@ -223,6 +226,29 @@ npm start
 ```
 
 The frontend runs at `http://localhost:4200`.
+
+## Testing & CI
+
+| Layer | Tool | Where | Run |
+| ----- | ---- | ----- | --- |
+| Backend unit / GraphQL / integration | pytest (+ testcontainers for MongoDB and Redis) | `tests/` | `uv run -m pytest` |
+| Frontend unit & component | Vitest via `@angular/build:unit-test` (jsdom) | `*.spec.ts` next to each file | `npm test` / `npm run test:ci` (with coverage) |
+| End-to-end | Playwright against the full Docker Compose stack | `e2e/` | see below |
+
+Integration tests are organised by feature, one user journey per file (`tests/integration/browsing/`, `catalog/`, `migration/`, `journeys/`). Frontend specs assert GraphQL traffic with `ApolloTestingController` and the codegen-generated documents, on a client configured with the app's own default options.
+
+**End-to-end.** The journeys run against the real stack — frontend, backend, migration worker, MongoDB, Redis and RustFS — started from the root `docker-compose.yml` plus an override file. A one-off seed service generates the test videos with ffmpeg and creates the bucket, and every journey only touches its own seeded directory, so they share one stack.
+
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+npm run stack:up      # build the images and start the stack (port 8080)
+npm test
+npm run stack:down    # also drops the volumes, so the next run starts clean
+```
+
+**CI** (`.github/workflows/ci.yml`) runs on pushes and pull requests to `main` and `develop`: backend and frontend tests in parallel, then the e2e job builds both images once (layer-cached), runs the journeys against them, and — on a push to `main` only — pushes **those same tested images** to Docker Hub as `latest` and `sha-<short sha>`. Dependencies install from the committed lock files (`uv.lock`, `package-lock.json`) everywhere, so tests, e2e and the published images use the same versions.
 
 ## Docker Deployment
 
@@ -297,21 +323,25 @@ video-app/
 ├── .env.example                     # Every environment variable, documented; copy to .env
 ├── Dockerfile                       # Backend image
 ├── docker-compose.yml               # frontend + backend + worker-migration + MongoDB + Redis + RustFS
-├── pyproject.toml                   # Dependencies and metadata
+├── pyproject.toml · uv.lock         # Dependencies and the lock file every install uses
+├── .github/workflows/ci.yml         # CI: backend + frontend tests → e2e → push images
 │
 ├── src/
 │   ├── app.py                       # App factory: logging, Mongo, task queues + progress bus, CORS, routers
-│   ├── worker.py                    # Migration worker's assembly root (taskiq entry: create_broker)
+│   ├── workers/                     # ── Task-queue processes (the only modules that import taskiq) ──
+│   │   ├── dispatch.py              # One Redis Stream broker per queue, submit, reconcile, recover
+│   │   └── worker_migration.py      # Migration worker's assembly root (taskiq entry: create_broker)
 │   ├── config.py                    # Settings (Pydantic + envyaml), handler config union
-│   ├── context.py                   # DI container: 13 services + path-lock registry
-│   ├── errors.py                    # Custom exceptions
+│   ├── constants/                   # Named constants not worth a setting, one file per concern (http · media · storage · tasks · redis · schema · log)
+│   ├── context.py                   # DI container: 15 services + the process's RedisService / RedisCache + path-lock registry
+│   ├── errors.py                    # Custom exceptions; REST routes raise them and app.py maps each to a status code
 │   ├── logger.py                    # loguru configuration
 │   │
 │   ├── db/
-│   │   └── setup_mongo.py           # Mongo client + Beanie init (registers the 5 documents)
+│   │   └── setup_mongo.py           # Mongo client + Beanie init (registers the 6 documents)
 │   │
 │   ├── platform/                    # ── Reusable core; imports no feature ──
-│   │   ├── cache/                   # base_cache · cachetools_cache · cache_service
+│   │   ├── redis/                   # redis_service (the one connection + key names) · redis_cache
 │   │   ├── media/
 │   │   │   └── ffmpeg_service.py    # Thumbnails, duration, transcoding (semaphore-gated)
 │   │   ├── storage/                 # Strategy pattern over storage backends
@@ -325,25 +355,26 @@ video-app/
 │   │       ├── task_model.py        # TaskStatus + BaseTaskModel (progress via accessors)
 │   │       ├── progress.py          # ProgressFrame — unit-agnostic current/total
 │   │       ├── state_machine.py     # TaskStateMachine[TTask] — 3 phases, crash recovery
-│   │       ├── dispatch.py          # One Redis Stream broker per queue, submit, reconcile, recover
 │   │       ├── progress_bus.py      # Redis Pub/Sub: worker publishes, web fans out to observers
 │   │       └── path_locks.py        # PathLockRegistry — "is this path busy?"
 │   │
 │   ├── features/                    # ── Business capabilities ──
 │   │   ├── catalog/                 # Video metadata
-│   │   │   ├── video.py · video_tag.py · series.py  # Documents
+│   │   │   ├── video_model.py · video_tag_model.py · series_model.py  # Documents
 │   │   │   ├── catalog_service.py         # Search, suggest, update, record view, delete
 │   │   │   ├── series_service.py          # Sole writer of series membership and order
 │   │   │   └── tag_operation_service.py   # Tag reference counts
 │   │   ├── browsing/                # Directory browsing and batch operations
-│   │   │   ├── dir_metadata.py · dir_metadata_service.py
+│   │   │   ├── dir_metadata_model.py · dir_metadata_service.py
 │   │   │   ├── directory_deletion.py      # DirectoryDeletionStrategy
 │   │   │   ├── browse_file_service.py     # 3-level navigation, in-directory search
 │   │   │   └── batch_operation_service.py # Batch update/delete, streaming progress
 │   │   ├── playback/                # Streaming and thumbnails (REST)
 │   │   │   └── video_stream_service.py · thumbnail_service.py · video_router.py
 │   │   └── migration/               # File migration
-│   │       ├── migration_task.py          # Extends BaseTaskModel
+│   │       ├── migration_task_model.py    # Extends BaseTaskModel
+│   │       ├── migration_batch_model.py · migration_batch.py  # Batches: preflight, window, summary
+│   │       ├── device_slots.py            # Copy slots per device
 │   │       └── migration_service.py       # TaskStateMachine subclass
 │   │
 │   ├── resolvers/                   # ── GraphQL delivery: validate → delegate → map ──
@@ -358,23 +389,30 @@ video-app/
 │           ├── migration_type.py · scalars.py
 │           └── pydantic_types/      # GraphQL input contracts
 │
-├── tests/                           # 695 cases (pytest --strict-markers), 90% coverage
-│   ├── conftest.py                  # test_settings, MongoDB, document factories
+├── tests/                           # 920 cases (pytest --strict-markers), 94% coverage
+│   ├── conftest.py                  # test_settings, MongoDB / Redis containers, document factories
 │   ├── unit/                        # Mirrors src/
 │   │   ├── test_architecture.py     # Dependency-direction guards (AST scan)
 │   │   ├── test_context_wiring.py · test_worker.py
-│   │   ├── platform/                # cache · jobs · media · storage
+│   │   ├── platform/                # redis · jobs · media · storage
 │   │   ├── features/                # catalog · browsing · playback · migration
 │   │   └── schema/                  # Pydantic input contracts
 │   ├── graphql/                     # Resolver tests (queries, mutations, subscriptions)
-│   └── integration/                 # End-to-end (testcontainers MongoDB)
+│   └── integration/                 # Full-stack journeys, one per file, grouped by feature
+│                                    #   (browsing · catalog · migration · journeys)
+│
+├── e2e/                             # Playwright journeys against the full compose stack
+│   ├── docker-compose.e2e.yml · e2e.env · seed.py   # Stack override, throwaway env, test data
+│   └── journeys/                    # smoke · metadata-search · migration · batch-operations · multi-tab
 │
 └── front-end/video-app-front/
     ├── codegen.ts                   # GraphQL codegen config
     ├── Dockerfile · nginx.conf      # Two-stage build → Nginx + reverse proxy
-    └── src/app/
+    ├── src/test-setup.ts · src/testing/ # jsdom stubs; shared fixtures and Apollo testing helper
+    └── src/app/                     # every *.ts has its *.spec.ts next to it
         ├── app.ts · app.routes.ts · app.config.ts   # Root, routes, Apollo (HTTP + WS links)
         ├── core/graphql/
+        │   ├── apollo-default-options.ts # Default fetch/error policies, shared with the specs
         │   ├── documents/           # queries · mutations · subscription · migration
         │   └── generated/graphql.ts # Auto-generated — never edit by hand
         ├── pages/
@@ -393,17 +431,19 @@ video-app/
         └── shared/
             ├── components/
             │   ├── video-card/ · pagination/ · header/ · sidebar/ · toast-displayer/
-            │   ├── video-player-host/     # The only file importing video.js
+            │   ├── video-player-host/     # The only file importing @videojs/html
             │   ├── video-edit-panel/ · batch-operation-panel/ · delete-check-panel/
             │   ├── new-folder-panel/ · search-panel/ · migration-panel/
-            │   ├── file-browse-table/ · bottom-toolbar/ · migration-task-list/
+            │   ├── file-browse-table/ · file-browse-grid/ # Table and thumbnail-grid views
+            │   ├── file-node-menu/ · file-thumbnail/      # Shared by both views
+            │   ├── bottom-toolbar/ · migration-task-list/
             │   ├── series-panel/ · series-reorder-list/ · series-name-input/
             │   └── tag-chip-input/        # FormValueControl<string[]>
             ├── interceptor/ · models/
             └── environments/
 ```
 
-> **Adding a background task type**: subclass `BaseTaskModel` (declaring its own `Settings.name`) and `TaskStateMachine[YourModel]`, implement the three phases, then give it a queue in `dispatch.Queue` and a worker assembly root like `src/worker.py`. The template and the dispatcher need no changes — tests drive a non-migration task type through both to prove it.
+> **Adding a background task type**: subclass `BaseTaskModel` (declaring its own `Settings.name`) and `TaskStateMachine[YourModel]`, implement the three phases, then give it a queue in `dispatch.Queue` and a worker assembly root like `src/workers/worker_migration.py`. The template and the dispatcher need no changes — tests drive a non-migration task type through both to prove it.
 
 > **Adding a storage backend**: declare `storage_type` on the handler, implement `from_config(spec)`, add it to `_HANDLER_TYPES`, and add a category config model to the `HandlerConfig` union. `_create_handler` does not change, and two guard tests pin the two registrations to each other.
 
@@ -441,20 +481,20 @@ resource_paths:
 # thumbnail_config:
 #   storage_category: S3-resource
 #   storage_pseudo_name: Resource-1
+#   storage_retry_cooldown: 30.0     # Seconds the storage is skipped after a failed read/write
+
+redis:                           # Cache, task queues and progress, for every process
+  url: $REDIS_URL|redis://localhost:6379/0
+  socket_timeout: 1.0            # An unreachable Redis degrades to cache misses
+  key_prefix: video-app
 
 cache_config:
-  cache_type: redis              # redis | cachetools (in-process)
-  key_prefix: video-app
   ttl:                           # Seconds per purpose; each caller passes its own
     dir_metadata: 300
-  redis:
-    url: $REDIS_URL|redis://localhost:6379/0
-    socket_timeout: 1.0          # An unreachable Redis degrades to cache misses
-  cachetools:
-    max_size: 3000               # Maximum entries
 
 # Effective value is max(ffmpeg_semaphore_limit, cpu_count // 2)
 ffmpeg_semaphore_limit: 4
+io_thread_pool_size: 32          # Threads for blocking storage IO (local disk, S3 requests)
 
 suggestion_limit:
   name: 10
@@ -472,6 +512,7 @@ video_extensions:
   - .m4v
   - .mpg
   - .mpeg
+  - .ts
 
 # Must stay in sync with the frontend's environment.ts
 validation:
@@ -483,11 +524,10 @@ validation:
   page_number_min: 1
   page_number_max: 10000
   series_name_max_length: 100
+  migration_batch_max_size: 500
+  migration_page_size_max: 100
 
 tasks:
-  redis_url: $REDIS_URL|redis://localhost:6379/0
-                                 # Task queues and progress frames between the web process
-                                 # and the workers.
   max_concurrent: 4              # Migrations copying at once, across every device.
   slots_per_device:              # Copies at once on ONE device, by storage type. Several
     local_fs: 1                  # copies on one spinning disk are slower in total than one.
@@ -503,6 +543,9 @@ tasks:
                                  # DB (a crashed worker sends no final frame).
   reconcile_interval: 300.0      # Seconds between re-sends of PENDING tasks whose message may
                                  # have been lost with Redis.
+  batch_window: 2                # Children of one batch running at once, so one batch cannot
+                                 # take every slot.
+  latest_frame_ttl: 60           # Seconds a task's latest progress frame is kept for late observers.
 
 logging:
   log_dir: logs
